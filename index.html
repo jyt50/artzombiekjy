@@ -41,11 +41,11 @@
 <body>
 <canvas id="c"></canvas>
 
-<!-- 터치 영역: 좌측 = 시점, 우측 = 이동 -->
+<!-- 터치 영역: 좌측 = 이동, 우측 = 시점 -->
 <div id="zoneL" class="zone" style="left:0"></div>
 <div id="zoneR" class="zone" style="right:0"></div>
-<div id="stickL" class="stick hidden"><div class="cap">시점</div><div class="knob"></div></div>
-<div id="stickR" class="stick hidden"><div class="cap">이동</div><div class="knob"></div></div>
+<div id="stickL" class="stick hidden"><div class="cap">이동</div><div class="knob"></div></div>
+<div id="stickR" class="stick hidden"><div class="cap">시점</div><div class="knob"></div></div>
 
 <!-- HUD -->
 <div id="hud" class="hidden fixed inset-0 pointer-events-none z-10">
@@ -155,7 +155,7 @@
     </div>
     <div id="netMsg" class="text-amber-300 text-sm font-semibold" style="min-height:22px"></div>
     <div class="text-[11px] text-slate-400 mt-2 leading-relaxed">
-      모바일: 화면 <b>오른쪽</b> 드래그 = 이동 · <b>왼쪽</b> 드래그 = 시점 · 왼쪽 버튼 = 미션/공격/신고 · 오른쪽 버튼 = 점프<br>
+      모바일: 화면 <b>왼쪽</b> 드래그 = 이동 · <b>오른쪽</b> 드래그 = 시점 · 왼쪽 버튼 = 미션/공격/신고 · 오른쪽 버튼 = 점프<br>
       PC: WASD·방향키 이동 · Space 점프 · 마우스 드래그 시점 · 휠 줌 · E 미션 · Q 공격 · R 신고/비상 투표 · (관전) Space/Shift 상승·하강
     </div>
   </div>
@@ -906,17 +906,18 @@ function kill(killer, victim) { // 방장 기기에서만 호출됨
 }
 
 /* =====================================================================
- * 7. 입력: 가상 조이스틱(우측 이동 / 좌측 시점) + 키보드/마우스
+ * 7. 입력: 가상 조이스틱(좌측 이동 / 우측 시점) + 키보드/마우스
  * ===================================================================== */
 const keys = {};
-const stickL = { el: $('stickL'), id: null, ox: 0, oy: 0, x: 0, y: 0 }, stickR = { el: $('stickR'), id: null, ox: 0, oy: 0, x: 0, y: 0 };
+// 모바일 배치: 왼쪽 = 이동 조이스틱, 오른쪽 = 시점 조이스틱
+const stickMove = { el: $('stickL'), id: null, ox: 0, oy: 0, x: 0, y: 0 }, stickLook = { el: $('stickR'), id: null, ox: 0, oy: 0, x: 0, y: 0 };
 let touchUI = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 function placeSticks() {
-  if (stickL.id === null) { stickL.el.style.left = '90px'; stickL.el.style.top = (innerHeight - 100) + 'px'; }
-  if (stickR.id === null) { stickR.el.style.left = (innerWidth - 90) + 'px'; stickR.el.style.top = (innerHeight - 100) + 'px'; }
+  if (stickMove.id === null) { stickMove.el.style.left = '90px'; stickMove.el.style.top = (innerHeight - 100) + 'px'; }
+  if (stickLook.id === null) { stickLook.el.style.left = (innerWidth - 90) + 'px'; stickLook.el.style.top = (innerHeight - 100) + 'px'; }
 }
 function applyTouchUI() {
-  stickL.el.classList.toggle('hidden', !touchUI); stickR.el.classList.toggle('hidden', !touchUI);
+  stickLook.el.classList.toggle('hidden', !touchUI); stickMove.el.classList.toggle('hidden', !touchUI);
   $('fabs').style.bottom = touchUI ? '190px' : '24px'; $('btnJump').style.bottom = touchUI ? '190px' : '24px';
   document.querySelectorAll('.pc').forEach(e => e.style.display = touchUI ? 'none' : '');
 }
@@ -946,7 +947,7 @@ function bindZone(zone, st) {
   zone.addEventListener('pointerup', up); zone.addEventListener('pointercancel', up); zone.addEventListener('lostpointercapture', up);
   zone.addEventListener('wheel', e => { U.dist = clamp(U.dist + Math.sign(e.deltaY) * 1.2, 5, 18); }, { passive: true });
 }
-bindZone($('zoneL'), stickL); bindZone($('zoneR'), stickR);
+bindZone($('zoneL'), stickMove); bindZone($('zoneR'), stickLook);
 addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -960,14 +961,14 @@ function fab(id, fn) { $(id).addEventListener('pointerdown', e => { e.preventDef
 fab('btnUse', () => doUse()); fab('btnKill', () => doKill()); fab('btnAct', () => doReport()); fab('btnJump', () => doJump());
 
 function moveInput() {
-  let mx = stickR.x, my = -stickR.y;
+  let mx = stickMove.x, my = -stickMove.y;
   if (keys.KeyW || keys.ArrowUp) my += 1; if (keys.KeyS || keys.ArrowDown) my -= 1;
   if (keys.KeyD || keys.ArrowRight) mx += 1; if (keys.KeyA || keys.ArrowLeft) mx -= 1;
   const l = Math.hypot(mx, my); if (l > 1) { mx /= l; my /= l; }
   return [mx, my];
 }
 function updateLook(dt) {
-  U.yaw -= stickL.x * 2.6 * dt; U.pitch -= stickL.y * 1.7 * dt;
+  U.yaw -= stickLook.x * 2.6 * dt; U.pitch -= stickLook.y * 1.7 * dt;
   U.pitch = isFree() ? clamp(U.pitch, -1.45, 1.45) : clamp(U.pitch, -1.35, -0.25);
 }
 function updateUserAvatar(dt) { // 3인칭 아바타 이동 (미니게임 중에는 이동 불가)
