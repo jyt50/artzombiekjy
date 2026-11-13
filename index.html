@@ -15,6 +15,10 @@
   /* Tailwind CDN 로딩 전/실패 시에도 레이어가 깨지지 않도록 하는 최소 폴백 */
   .hidden{display:none!important}.fixed{position:fixed}.absolute{position:absolute}.relative{position:relative}.inset-0{inset:0}
   .z-10{z-index:10}.z-20{z-index:20}.z-40{z-index:40}.z-50{z-index:50}.pointer-events-none{pointer-events:none}
+  /* 모바일 확대 방지: 연타(더블탭) 확대를 끄고, 입력창 포커스 때 iOS 가 자동 확대하지 않도록 글자를 16px 이상으로 */
+  *{touch-action:manipulation}
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  @media (pointer:coarse){input,select,textarea{font-size:16px!important}}
   #c{position:fixed;inset:0;width:100%;height:100%;display:block}
   .zone{position:fixed;top:0;height:100%;width:50%;z-index:5;touch-action:none}
   .stick{position:fixed;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;z-index:6;pointer-events:none;
@@ -1009,6 +1013,15 @@ function bindZone(zone, st) {
 }
 bindZone($('zoneL'), stickMove); bindZone($('zoneR'), stickLook);
 addEventListener('contextmenu', e => e.preventDefault());
+// ---- 모바일 확대 방지 (iOS 는 viewport 의 user-scalable=no 를 무시하므로 직접 막음) ----
+{ const typing = t => t && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName); let lastTap = 0;
+  document.addEventListener('touchend', e => { const now = Date.now(); // 0.35초 안의 두 번째 탭 = 더블탭 확대 → 차단
+    if (now - lastTap < 350 && !typing(e.target) && e.cancelable) { e.preventDefault();
+      const b = e.target.closest && e.target.closest('button,label,a'); if (b) b.click(); } // 확대만 막고, 버튼 누름은 그대로 전달
+    lastTap = now; }, { passive: false });
+  document.addEventListener('touchmove', e => { if (e.touches.length > 1 && e.cancelable) e.preventDefault(); }, { passive: false }); // 두 손가락 확대
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false })); // iOS 핀치
+  document.addEventListener('dblclick', e => { if (!typing(e.target)) e.preventDefault(); }, { passive: false }); }
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   keys[e.code] = true;
