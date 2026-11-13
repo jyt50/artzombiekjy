@@ -1,0 +1,1812 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>미술실 좀비 추리</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- PeerJS (WebRTC 데이터 채널). 첫 주소가 막혀 있으면 두 번째 주소에서 다시 받습니다 -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(s)"></script>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#141926;color:#fff;
+    font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none;touch-action:none}
+  /* Tailwind CDN 로딩 전/실패 시에도 레이어가 깨지지 않도록 하는 최소 폴백 */
+  .hidden{display:none!important}.fixed{position:fixed}.absolute{position:absolute}.relative{position:relative}.inset-0{inset:0}
+  .z-10{z-index:10}.z-20{z-index:20}.z-40{z-index:40}.z-50{z-index:50}.pointer-events-none{pointer-events:none}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  .zone{position:fixed;top:0;height:100%;width:50%;z-index:5;touch-action:none}
+  .stick{position:fixed;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;z-index:6;pointer-events:none;
+    background:rgba(255,255,255,.10);border:2px solid rgba(255,255,255,.35)}
+  .stick .knob{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;
+    background:rgba(255,255,255,.55);box-shadow:0 2px 8px rgba(0,0,0,.4)}
+  .stick .cap{position:absolute;left:0;right:0;top:-22px;text-align:center;font-size:11px;color:rgba(255,255,255,.7)}
+  .fab{touch-action:none;transition:transform .08s,opacity .15s}
+  .fab:active{transform:scale(.93)}
+  .fab.off{opacity:.35;filter:grayscale(.6)}
+  .panel{background:rgba(15,20,34,.82);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.12)}
+  input[type=number]{-moz-appearance:textfield}
+  .chat-log::-webkit-scrollbar{width:4px}.chat-log::-webkit-scrollbar-thumb{background:#556}
+  /* 미니게임 공용 */
+  .mg-stage{position:relative;margin:0 auto;border-radius:12px;overflow:hidden;touch-action:none}
+  .mg-item{position:absolute;touch-action:none;cursor:grab;transition:left .18s,top .18s,opacity .25s,transform .25s}
+  .mg-msg{min-height:18px;text-align:center;font-size:12px;color:#cbd5e1;margin-top:8px}
+  .well{position:relative;width:100%;aspect-ratio:1;border-radius:50%;background:#cbbd9f;box-shadow:inset 0 3px 6px rgba(0,0,0,.35);touch-action:none;overflow:hidden}
+  .well:active{transform:scale(.92)}
+  .well i{position:absolute;inset:0;border-radius:50%;transform:scale(0);transition:transform .1s}
+  .well b{position:relative;font-size:11px;color:#3b2f1c}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- 터치 영역: 좌측 = 시점, 우측 = 이동 -->
+<div id="zoneL" class="zone" style="left:0"></div>
+<div id="zoneR" class="zone" style="right:0"></div>
+<div id="stickL" class="stick hidden"><div class="cap">시점</div><div class="knob"></div></div>
+<div id="stickR" class="stick hidden"><div class="cap">이동</div><div class="knob"></div></div>
+
+<!-- HUD -->
+<div id="hud" class="hidden fixed inset-0 pointer-events-none z-10">
+  <div class="absolute top-2 left-2 panel rounded-xl px-3 py-2 text-xs max-w-[46vw] sm:max-w-xs">
+    <div class="flex items-center gap-2 mb-1"><span id="hudRole" class="px-2 py-0.5 rounded-full font-bold text-[11px]"></span><span id="hudRoom" class="text-slate-300 truncate"></span></div>
+    <div id="hudMissions" class="space-y-0.5 leading-snug"></div>
+  </div>
+  <div class="absolute top-2 left-1/2 -translate-x-1/2 panel rounded-xl px-3 py-1.5 text-center min-w-[130px]">
+    <div id="hudPhase" class="text-[11px] text-slate-300"></div>
+    <div id="hudTimer" class="text-xl font-extrabold tabular-nums leading-tight"></div>
+    <div class="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden my-1"><div id="hudBar" class="h-full bg-emerald-400" style="width:0%"></div></div>
+    <div id="hudVotes" class="text-[10px] text-slate-300"></div>
+  </div>
+  <canvas id="mini" width="288" height="160" class="absolute top-2 right-2 rounded-lg border border-white/20" style="width:144px;height:80px;background:#0c101a"></canvas>
+  <div id="toast" class="absolute left-1/2 -translate-x-1/2 top-24 panel rounded-full px-4 py-2 text-sm font-semibold opacity-0 transition-opacity duration-300 whitespace-nowrap"></div>
+</div>
+
+<!-- 방장 패널 -->
+<div id="hostPanel" class="hidden fixed left-1/2 -translate-x-1/2 top-[86px] z-20 panel rounded-xl px-3 py-2 text-xs flex flex-wrap items-center justify-center gap-2 max-w-[96vw]">
+  <div class="w-full text-center" style="width:100%">입장 코드 <b id="roomCode" class="text-2xl tracking-widest text-amber-300 align-middle" style="font-size:1.5rem;letter-spacing:.15em;user-select:text;-webkit-user-select:text"></b> <span id="roomCount" class="text-slate-300 ml-2"></span></div>
+  <label class="flex items-center gap-1">미션 제한시간(초)<input data-cfg="missionTime" type="number" min="15" max="600" class="w-14 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">최후 변론(초)<input data-cfg="defenseTime" type="number" min="5" max="120" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">총 투표 횟수<input data-cfg="maxVotes" type="number" min="1" max="20" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">좀비 수<input data-cfg="zombies" type="number" min="1" max="9" class="w-10 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">킬 쿨타임(초)<input data-cfg="killCooldown" type="number" min="3" max="120" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">순간이동 쿨타임(초)<input data-cfg="teleportCooldown" type="number" min="3" max="120" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">비상 투표(1인당)<input data-cfg="emergPer" type="number" min="0" max="5" class="w-10 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">채팅
+    <select id="hostChat" class="bg-slate-800 rounded px-1 py-0.5">
+      <option value="all">허용</option><option value="cand">변론자만 허용</option><option value="none">전체 금지</option>
+    </select></label>
+  <button id="hostStart" class="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold rounded px-3 py-1">게임 시작</button>
+  <button id="hostPause" class="bg-slate-600 hover:bg-slate-500 rounded px-3 py-1">일시정지</button>
+  <button id="hostVote" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded px-3 py-1">즉시 투표</button>
+  <button id="hostReset" class="bg-rose-600 hover:bg-rose-500 rounded px-3 py-1">대기방으로 리셋</button>
+  <button id="hostClose" class="bg-slate-700 hover:bg-slate-600 rounded px-3 py-1">방 닫기</button>
+  <!-- [테스트 전용] AI 봇 스위치: 봇 모듈이 있을 때만 보이며, 방장만 대기방에서 켤 수 있음 -->
+  <label id="botWrap" class="hidden flex items-center gap-1 text-slate-300">(테스트) AI 봇으로 빈 자리 채우기<input id="hostBots" type="checkbox"></label>
+</div>
+
+<!-- 플로팅 액션 버튼 (좌측) -->
+<div id="fabs" class="hidden fixed left-3 z-20 flex flex-col gap-2 items-start" style="bottom:24px">
+  <button id="btnAct" class="fab off rounded-full px-4 py-2.5 bg-sky-500 text-white text-sm font-bold shadow-lg">📣 시체 신고<span class="pc"> (R)</span></button>
+  <button id="btnKill" class="fab off hidden rounded-full px-4 py-2.5 bg-rose-600 text-white text-sm font-bold shadow-lg">🧟 공격<span class="pc"> (Q)</span></button>
+  <button id="btnUse" class="fab off rounded-full px-5 py-3 bg-amber-400 text-slate-900 text-base font-extrabold shadow-lg">🎨 미션 수행<span class="pc"> (E)</span></button>
+</div>
+
+<!-- 점프 버튼 (우측) -->
+<button id="btnJump" class="fab hidden fixed right-4 z-20 rounded-full bg-white/20 border border-white/40 text-sm font-bold shadow-lg" style="bottom:24px;width:64px;height:64px">점프<span class="pc" style="font-size:10px;font-weight:400"><br>Space</span></button>
+
+<!-- 대기방 안내 (학생용, 규칙은 읽기 전용) -->
+<div id="waitPanel" class="hidden fixed left-1/2 -translate-x-1/2 top-[86px] z-20 panel rounded-xl px-4 py-2 text-xs text-center max-w-[92vw]">
+  <div class="font-bold text-sm text-amber-300">⏳ 대기방 — 방장이 규칙을 정하고 있습니다</div>
+  <div id="waitRules" class="text-slate-200 mt-1"></div>
+  <div id="waitInfo" class="text-slate-400 mt-0.5"></div>
+</div>
+
+<!-- 대기방 채팅 (플레이어·방장 공용, 게임이 시작되면 사라짐) -->
+<button id="lcToggle" class="hidden fixed right-2 z-20 panel rounded-full px-3 py-1.5 text-xs font-bold" style="top:96px">💬 대기방 채팅 <span id="lcBadge" class="hidden" style="background:#e53935;border-radius:999px;padding:0 6px;margin-left:2px">0</span></button>
+<div id="lobbyChat" class="hidden fixed right-2 z-20 panel rounded-xl p-2 text-xs" style="top:130px;width:min(270px,72vw);box-sizing:border-box">
+  <div id="lcLog" class="chat-log overflow-y-auto" style="height:120px;overflow-y:auto;user-select:text;-webkit-user-select:text;line-height:1.5;margin-bottom:6px"></div>
+  <form id="lcForm" style="display:flex;gap:4px"><input id="lcIn" maxlength="60" autocomplete="off" class="rounded bg-slate-800 px-2 py-1.5 outline-none focus:ring-2 ring-amber-400 disabled:opacity-50" style="flex:1;min-width:0;user-select:text;-webkit-user-select:text;touch-action:auto;box-sizing:border-box">
+  <button id="lcBtn" class="rounded bg-amber-400 text-slate-900 font-bold px-2 disabled:opacity-40">전송</button></form>
+</div>
+
+<!-- 미니게임 모달 -->
+<div id="mini-modal" class="hidden fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-3">
+  <div class="panel rounded-2xl w-full max-w-sm p-4 max-h-[98vh] overflow-y-auto">
+    <div class="flex items-start justify-between gap-2 mb-1">
+      <div><div id="mgTitle" class="font-extrabold text-lg"></div><div id="mgDesc" class="text-xs text-slate-300"></div></div>
+      <button id="mgClose" class="bg-slate-700 hover:bg-slate-600 rounded-full w-8 h-8 shrink-0">✕</button>
+    </div>
+    <div class="h-3 w-full bg-slate-700 rounded-full overflow-hidden my-2"><div id="mgBar" class="h-full bg-amber-400 transition-all duration-100" style="width:0%"></div></div>
+    <div id="mgBody" class="select-none" style="touch-action:none"></div>
+  </div>
+</div>
+
+<!-- 회의(투표/변론) 모달 -->
+<div id="meet" class="hidden fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-3">
+  <div id="meetBody" class="panel rounded-2xl w-full max-w-xl p-4 max-h-[92vh] overflow-y-auto"></div>
+</div>
+
+<!-- 역할 공개 -->
+<div id="reveal" class="hidden fixed inset-0 z-40 pointer-events-none flex items-center justify-center bg-black/70">
+  <div class="text-center px-6"><div class="text-slate-300 text-sm mb-2">당신의 역할은…</div><div id="revealT" class="text-5xl font-black"></div><div id="revealS" class="text-sm mt-3 text-slate-200"></div></div>
+</div>
+
+<!-- 시작 화면: 코드로 입장(학생) / 방 만들기(방장) -->
+<div id="start" class="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4 overflow-y-auto">
+  <div class="w-full max-w-md text-center">
+    <div class="text-4xl font-black tracking-tight mb-1">🎨 미술실 좀비 추리</div>
+    <div class="text-slate-300 text-sm mb-4">최대 30명이 각자 기기로 함께 플레이합니다 · 규칙은 방장이 정하고, 역할은 시작할 때 무작위로 배정됩니다</div>
+    <div class="panel rounded-xl p-3 mb-3 text-left">
+      <div class="text-xs font-bold text-emerald-300 mb-2">🚪 학생 — 코드로 입장</div>
+      <div class="grid grid-cols-2 gap-2" style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <input id="nick" maxlength="8" autocomplete="off" placeholder="닉네임 (최대 8자)" class="w-full rounded-lg bg-slate-800 px-3 py-2.5 text-base outline-none focus:ring-2 ring-emerald-400" style="user-select:text;-webkit-user-select:text;touch-action:auto;box-sizing:border-box;min-width:0">
+        <input id="joinCode" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="입장 코드 6자리" class="w-full rounded-lg bg-slate-800 px-3 py-2.5 text-base tracking-widest text-center outline-none focus:ring-2 ring-emerald-400" style="user-select:text;-webkit-user-select:text;touch-action:auto;box-sizing:border-box;min-width:0">
+      </div>
+      <button id="btnJoin" class="w-full mt-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-extrabold py-3 text-lg">대기방 입장</button>
+    </div>
+    <div class="panel rounded-xl p-3 mb-2 text-left">
+      <div class="text-xs font-bold text-indigo-300 mb-2">👑 방장 — 방 만들기</div>
+      <div class="flex gap-2 items-center" style="display:flex;gap:.5rem">
+        <input id="adminKey" type="password" autocomplete="off" placeholder="방장 admin 키" class="flex-1 min-w-0 rounded-lg bg-slate-800 px-3 py-2.5 text-sm outline-none focus:ring-2 ring-indigo-400" style="flex:1;min-width:0;user-select:text;-webkit-user-select:text;touch-action:auto;box-sizing:border-box">
+        <button id="btnHost" class="rounded-lg bg-indigo-500 hover:bg-indigo-400 font-extrabold px-4 py-2.5 whitespace-nowrap">방 만들기</button>
+      </div>
+    </div>
+    <div id="netMsg" class="text-amber-300 text-sm font-semibold" style="min-height:22px"></div>
+    <div class="text-[11px] text-slate-400 mt-2 leading-relaxed">
+      모바일: 화면 <b>오른쪽</b> 드래그 = 이동 · <b>왼쪽</b> 드래그 = 시점 · 왼쪽 버튼 = 미션/공격/신고 · 오른쪽 버튼 = 점프<br>
+      PC: WASD·방향키 이동 · Space 점프 · 마우스 드래그 시점 · 휠 줌 · E 미션 · Q 공격 · R 신고/비상 투표 · (관전) Space/Shift 상승·하강
+    </div>
+  </div>
+</div>
+
+<!-- 종료 화면 -->
+<div id="end" class="hidden fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
+  <div class="panel rounded-2xl w-full max-w-md p-5 text-center">
+    <div id="endTitle" class="text-3xl font-black mb-1"></div>
+    <div id="endReason" class="text-slate-300 text-sm mb-3"></div>
+    <div id="endRoles" class="text-sm mb-4"></div>
+    <div id="endWait" class="hidden text-slate-300 text-xs mb-3">방장이 대기방을 다시 열면 자동으로 이동합니다</div>
+    <button id="endBtn" class="rounded-xl bg-amber-400 text-slate-900 font-extrabold px-6 py-2.5">모두 대기방으로</button>
+    <button id="endExit" class="rounded-xl bg-slate-600 font-bold px-5 py-2.5 ml-1">나가기</button>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+/* =====================================================================
+ * 0. 설정 / 유틸
+ * ===================================================================== */
+// AI 봇 모듈 사용 여부(테스트용). 켜져 있어도 봇은 방장이 대기방에서 스위치를 켰을 때만 생깁니다.
+// false 로 바꾸거나, 파일 아래쪽의 "AI BOT MODULE" 블록을 통째로 지워도 게임은 정상 동작합니다.
+const ENABLE_BOTS = true;
+// 방장 입장용 admin 키. (주의: 이 파일만으로는 소스 보기로 누구나 읽을 수 있습니다. 실제 서버를 붙일 때는 서버에서 검사하세요)
+const ADMIN_KEY = 'teacher';
+const CFG = {
+  maxPlayers: 30, zombies: 4, missionTime: 90, defenseTime: 20, maxVotes: 5,
+  missionsPer: 3, killCooldown: 20, firstKillDelay: 12, killRange: 2.4, useRange: 2.8,
+  emergPer: 1, emergDelay: 15,  // 비상 투표: 1인당 횟수(0 = 사용 안 함), 라운드 시작 후 대기 시간(초)
+  teleportCooldown: 15,         // 좀비 미니맵 순간이동 쿨타임(초)
+  playerSpeed: 5.4, vote1Time: 20, vote2Time: 15, sightRange: 30, witnessRange: 11,
+  chatMode: 'all', // 방장 채팅 제어: 'all' 허용 | 'cand' 변론자만 | 'none' 전체 금지
+};
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = arr => arr[(Math.random() * arr.length) | 0];
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const hex = c => '#' + c.toString(16).padStart(6, '0');
+const esc = s => s.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+// 30가지 고유 색상 (무채색 5종 포함)
+const COLORS = [
+  ['하양', 0xffffff], ['연회색', 0xc4c7cc], ['회색', 0x8a8f98], ['진회색', 0x4b5058], ['검정', 0x1b1c20],
+  ['빨강', 0xe53935], ['진홍', 0x8f1526], ['분홍', 0xff9ac4], ['핫핑크', 0xff2d95], ['주황', 0xff8a1f],
+  ['살구', 0xffc49a], ['노랑', 0xffd92e], ['레몬', 0xf2f58a], ['연두', 0xa6e22e], ['초록', 0x2fa84f],
+  ['숲색', 0x14592f], ['민트', 0x5fe0c0], ['청록', 0x0f9aa0], ['하늘', 0x6ec6ff], ['파랑', 0x2364e0],
+  ['남색', 0x1b2a6b], ['보라', 0x8a3ffc], ['라벤더', 0xc6aef7], ['자주', 0xa0208f], ['갈색', 0x7a4a26],
+  ['베이지', 0xd9c3a0], ['카키', 0x8b8747], ['올리브', 0x4d5a1e], ['코랄', 0xff6f61], ['금색', 0xc9a227],
+];
+
+// 미션 포인트 10곳 (game = 미니게임 레지스트리 키)
+const MISSIONS = [
+  { id: 1, name: '팔레트 물감 짜기', game: 'palette', x: -48, z: -20 },
+  { id: 2, name: '붓 세척하기', game: 'brush', x: 48, z: -21 },
+  { id: 3, name: '조각상 먼지 털기', game: 'dust', x: 0, z: -20.5 },
+  { id: 4, name: '색상환 맞추기', game: 'colormix', x: -24, z: -21 },
+  { id: 5, name: '쓰레기 분리수거', game: 'recycle', x: 24, z: -19.5 },
+  { id: 6, name: '이젤 나사 조이기', game: 'screw', x: -48, z: 27 },
+  { id: 7, name: '찢어진 명화 복원하기', game: 'puzzle', x: -18, z: 25.1 },
+  { id: 8, name: '가위질 선 따라 자르기', game: 'cut', x: 10, z: 27 },
+  { id: 9, name: '미술 도구 제자리 정리', game: 'tools', x: 48, z: 31 },
+  { id: 10, name: '책상 닦기', game: 'wipe', x: 74, z: -20 },
+];
+
+const EMERG = { x: 0, z: 4.7 };   // 시작 지점의 비상 투표 버튼 위치
+const CORNERS = [[-57.5, -37.5], [-57.5, 37.5], [81.5, -37.5], [81.5, 37.5]]; // 좀비 순간이동 도착지(맵의 네 구석)
+
+/* =====================================================================
+ * 1. Three.js 기본 세팅
+ * ===================================================================== */
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: window.devicePixelRatio < 2, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b2233);
+scene.fog = new THREE.Fog(0x1b2233, 45, 120);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.3, 160);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3f55, 0.95));
+const sun = new THREE.DirectionalLight(0xfff1d6, 0.65); sun.position.set(30, 60, 20); scene.add(sun);
+function onResize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); placeSticks(); }
+addEventListener('resize', onResize);
+
+/* =====================================================================
+ * 2. 맵 생성 (학교 미술실) — 모든 정적 박스는 InstancedMesh 1개로 그림
+ * ===================================================================== */
+const MAP = { x0: -60, z0: -40, x1: 84, z1: 40 };
+const ROOMS = [
+  { name: '뒷복도', x0: -60, z0: -40, x1: 60, z1: -33, color: 0x5d5148 },
+  { name: '제1미술실', x0: -60, z0: -33, x1: -36, z1: -6, color: 0xc9b79a },
+  { name: '제2미술실', x0: -36, z0: -33, x1: -12, z1: -6, color: 0xbba98a },
+  { name: '석고상 보관실', x0: -12, z0: -33, x1: 12, z1: -6, color: 0x9fa6ad },
+  { name: '화구 창고', x0: 12, z0: -33, x1: 36, z1: -6, color: 0x8d7b66 },
+  { name: '세면실', x0: 36, z0: -33, x1: 60, z1: -6, color: 0x9cc7d1 },
+  { name: '갤러리 복도', x0: -60, z0: -6, x1: 60, z1: 6, color: 0x6f5a4a },
+  { name: '디자인실', x0: -60, z0: 6, x1: -36, z1: 40, color: 0xb9c2a3 },
+  { name: '파티션 미로 전시실', x0: -36, z0: 6, x1: 0, z1: 40, color: 0xa99fb8 },
+  { name: '도예실', x0: 0, z0: 6, x1: 20, z1: 40, color: 0xb58f73 },
+  { name: '미술 준비실', x0: 20, z0: 6, x1: 36, z1: 40, color: 0xa7a08f },
+  { name: '사진 암실', x0: 36, z0: 6, x1: 60, z1: 40, color: 0x5a4046 },
+  { name: '야외 테라스', x0: 60, z0: -40, x1: 84, z1: 40, color: 0x6f9a62 },
+];
+const boxes = [];      // [x,y,z,sx,sy,sz,color]
+const spheres = [];    // [x,y,z,r,color]
+const colliders = [];  // {x0,x1,z0,z1,h}
+function box(x, y, z, sx, sy, sz, color, collide) {
+  boxes.push([x, y, z, sx, sy, sz, color]);
+  if (collide) colliders.push({ x0: x - sx / 2, x1: x + sx / 2, z0: z - sz / 2, z1: z + sz / 2, h: y + sy / 2 });
+}
+const DOORS = []; // [x,z] 문 위치 (소품 배치 시 피함)
+const WH = 3.2, WT = 0.6, WALLC = 0xece5d6, CAPC = 0x39405a, FENCE = 0x8a6a44, WOOD = 0x9b6b3d;
+function wallSegs(a, b, gaps) {
+  const out = []; let cur = a;
+  (gaps || []).slice().sort((p, q) => p[0] - q[0]).forEach(([c, w]) => { out.push([cur, c - w / 2]); cur = c + w / 2; });
+  out.push([cur, b]); return out.filter(s => s[1] - s[0] > 0.05);
+}
+function wallX(z, x0, x1, gaps, h = WH, col = WALLC) { (gaps || []).forEach(g => DOORS.push([g[0], z])); wallSegs(x0, x1, gaps).forEach(([a, b]) => { box((a + b) / 2, h / 2, z, b - a, h, WT, col, true); box((a + b) / 2, h + 0.06, z, b - a, 0.12, WT + 0.12, CAPC); }); }
+function wallZ(x, z0, z1, gaps, h = WH, col = WALLC) { (gaps || []).forEach(g => DOORS.push([x, g[0]])); wallSegs(z0, z1, gaps).forEach(([a, b]) => { box(x, h / 2, (a + b) / 2, WT, h, b - a, col, true); box(x, h + 0.06, (a + b) / 2, WT + 0.12, 0.12, b - a, CAPC); }); }
+// 가구 헬퍼: o=0 이면 X축 방향, o=1 이면 Z축 방향으로 놓임. cw=0 이면 충돌 없음(벽걸이)
+function furn(x, z, o, parts, cw, cd, ch) {
+  parts.forEach(([dx, y, dz, sx, sy, sz, c]) => o ? box(x + dz, y, z + dx, sz, sy, sx, c) : box(x + dx, y, z + dz, sx, sy, sz, c));
+  if (!cw) return;
+  const w = o ? cd : cw, d = o ? cw : cd;
+  colliders.push({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2, h: ch });
+}
+const mapRnd = mulberry32(20261113);
+const CANV = [0xf4efe2, 0xe07a5f, 0x81b29a, 0xf2cc8f, 0x7aa6d6, 0xd4a5c9, 0xf6f1d1];
+const PASTEL = [0xd9a7a0, 0xa0c4d9, 0xb7d9a0, 0xd9cfa0, 0xc0a0d9, 0xe8e8e8, 0x9fb0c0];
+const BOOKC = [0xb23a48, 0x2a6f97, 0xe9c46a, 0x52796f, 0x6d597a, 0xf4a261, 0xe5e5e5, 0x264653];
+const cpick = a => a[(mapRnd() * a.length) | 0];
+const easel = (x, z, o) => furn(x, z, o, [[0, 1.55, 0, 1.2, 1.4, 0.08, cpick(CANV)], [-0.5, 0.95, 0.06, 0.08, 1.9, 0.08, WOOD], [0.5, 0.95, 0.06, 0.08, 1.9, 0.08, WOOD], [0, 0.95, 0.36, 0.08, 1.9, 0.08, WOOD], [0, 0.82, -0.08, 1.3, 0.06, 0.18, WOOD]], 1.3, 0.8, 2.3);
+const partition = (x, z, len, o) => furn(x, z, o, [[0, 1.25, 0, len, 2.3, 0.2, cpick(PASTEL)], [-len / 2 + 0.2, 0.06, 0, 0.12, 0.12, 0.9, 0x444444], [len / 2 - 0.2, 0.06, 0, 0.12, 0.12, 0.9, 0x444444]], len, 0.3, 2.4);
+const bigBoard = (x, z, o) => furn(x, z, o, [[0, 1.3, 0, 3.2, 2.2, 0.14, cpick(CANV)], [0, 0.12, 0, 3.3, 0.24, 0.5, WOOD], [0, 2.44, 0, 3.3, 0.1, 0.2, WOOD]], 3.2, 0.4, 2.5);
+const cabinet = (x, z, o) => furn(x, z, o, [[0, 1.1, 0, 2, 2.2, 0.8, 0x7d8ca3], [0, 1.1, 0.41, 0.05, 2.0, 0.02, 0x3b4252], [0, 1.1, -0.41, 0.05, 2.0, 0.02, 0x3b4252]], 2, 0.8, 2.2);
+const table = (x, z, o) => furn(x, z, o, [[0, 0.85, 0, 2.6, 0.1, 1.3, 0xc8a66f], [-1.15, 0.4, -0.5, 0.12, 0.8, 0.12, 0x555555], [1.15, 0.4, -0.5, 0.12, 0.8, 0.12, 0x555555], [-1.15, 0.4, 0.5, 0.12, 0.8, 0.12, 0x555555], [1.15, 0.4, 0.5, 0.12, 0.8, 0.12, 0x555555], [mapRnd() - 0.5, 0.95, 0, 0.5, 0.1, 0.4, cpick(CANV)]], 2.6, 1.3, 0.95);
+const shelf = (x, z, o) => furn(x, z, o, [[0, 1.3, 0, 4, 2.6, 0.7, 0x6b4f35], [-1.2, 0.8, 0.36, 1, 0.5, 0.04, cpick(CANV)], [0.6, 1.6, 0.36, 1.4, 0.5, 0.04, cpick(CANV)], [-0.4, 2.2, -0.36, 1.6, 0.4, 0.04, cpick(CANV)], [1.2, 0.8, -0.36, 1, 0.5, 0.04, cpick(CANV)]], 4, 0.7, 2.6);
+const sink = (x, z, o) => furn(x, z, o, [[0, 0.5, 0, 5, 1, 0.9, 0xf2f4f5], [0, 1.02, 0, 4.6, 0.05, 0.6, 0x5fb4d6], [0, 1.3, -0.38, 4.8, 0.5, 0.08, 0xcfd8dc]], 5, 0.9, 1.1);
+const crate = (x, z, s = 1) => box(x, s / 2, z, s, s, s, cpick([0xa9793f, 0x8a6a44, 0xb98d55]), true);
+function plinth(x, z) { box(x, 0.55, z, 1, 1.1, 1, 0xdadada, true); colliders[colliders.length - 1].h = 2.0; box(x, 1.28, z, 0.7, 0.36, 0.42, 0xf7f7f2); box(x, 1.52, z, 0.22, 0.2, 0.22, 0xf7f7f2); spheres.push([x, 1.86, z, 0.3, 0xf7f7f2]); }
+function tree(x, z) { box(x, 1.5, z, 0.6, 3, 0.6, 0x6b4a2b, true); colliders[colliders.length - 1].h = 4.5; spheres.push([x, 3.6, z, 1.7, 0x3f8f4a]); }
+const hedge = (x, z, o) => furn(x, z, o, [[0, 0.95, 0, 6, 1.9, 1, 0x3b7d3f]], 6, 1, 1.9);
+const planter = (x, z) => { box(x, 0.4, z, 1.5, 0.8, 1.5, 0x8a5a3a, true); spheres.push([x, 1.2, z, 0.7, 0x4caf50]); };
+const kiln = (x, z) => { box(x, 1.2, z, 2.4, 2.4, 2.4, 0x7a3b2e, true); box(x, 1.1, z - 1.21, 1.2, 1.2, 0.05, 0x2b1b17); };
+
+// ---- 벽면 소품 (s = 방 안쪽을 향하는 방향 부호) ----
+const WALL_ITEMS = {
+  // 바닥에 놓이는 가구: L(길이) D(깊이) H(충돌 높이)
+  bookcase: { L: 2.6, D: 0.6, H: 2.4, parts: s => { const p = [[0, 1.2, 0, 2.6, 2.4, 0.6, 0x5b4330]];
+      [0.55, 1.25, 1.95].forEach(y => { let x = -1.15; while (x < 1.0) { const w = 0.25 + mapRnd() * 0.4; p.push([x + w / 2, y, s * 0.3, w - 0.04, 0.42 + mapRnd() * 0.12, 0.06, cpick(BOOKC)]); x += w; } }); return p; } },
+  desk: { L: 2.2, D: 0.9, H: 0.9, parts: s => [[0, 0.82, 0, 2.2, 0.08, 0.9, 0xc8a66f], [-1.04, 0.4, 0, 0.08, 0.8, 0.85, 0x8a6a44], [1.04, 0.4, 0, 0.08, 0.8, 0.85, 0x8a6a44], [0.5, 0.56, 0, 0.9, 0.44, 0.8, 0x9b7a4f],
+      [-0.45, 0.89, 0, 0.6, 0.04, 0.45, 0xf4efe2], [0.7, 0.98, -s * 0.2, 0.18, 0.24, 0.18, cpick(BOOKC)]] },
+  sinkS: { L: 2.4, D: 0.8, H: 1.0, parts: s => [[0, 0.45, 0, 2.4, 0.9, 0.8, 0xf2f4f5], [0, 0.92, s * 0.05, 1.8, 0.05, 0.5, 0x5fb4d6], [0, 1.3, -s * 0.36, 2.4, 0.75, 0.06, 0xcfd8dc], [0, 1.18, -s * 0.22, 0.08, 0.3, 0.08, 0x8a8f98], [0, 1.3, -s * 0.1, 0.08, 0.06, 0.3, 0x8a8f98]] },
+  lowShelf: { L: 2.6, D: 0.5, H: 1.3, parts: s => [[0, 0.6, 0, 2.6, 1.2, 0.5, 0x8a6a44], [0, 0.62, s * 0.26, 2.4, 0.04, 0.02, 0x4a3828],
+      [-0.9, 1.36, 0, 0.26, 0.32, 0.26, cpick(BOOKC)], [-0.4, 1.32, 0, 0.22, 0.24, 0.22, cpick(BOOKC)], [0.2, 1.4, 0, 0.3, 0.4, 0.3, cpick(BOOKC)], [0.85, 1.3, 0, 0.5, 0.2, 0.35, cpick(CANV)]] },
+  // 벽걸이(충돌 없음)
+  picture: { L: 1.7, D: 0, parts: s => [[0, 2.0, 0.04 * s, 1.7, 1.2, 0.06, cpick([0x3b2f2f, 0x8a6a44, 0xc9a227])], [0, 2.0, 0.08 * s, 1.42, 0.92, 0.04, cpick(CANV)], [(mapRnd() - 0.5) * 0.6, 1.9 + mapRnd() * 0.2, 0.11 * s, 0.5, 0.4, 0.02, cpick(BOOKC)]] },
+  wallShelf: { L: 2.4, D: 0, parts: s => [[0, 1.9, 0.22 * s, 2.4, 0.08, 0.42, 0x8a6a44], [-0.8, 2.1, 0.22 * s, 0.24, 0.32, 0.24, cpick(BOOKC)], [-0.2, 2.06, 0.22 * s, 0.2, 0.24, 0.2, cpick(BOOKC)], [0.5, 2.14, 0.22 * s, 0.5, 0.4, 0.12, cpick(BOOKC)], [0.95, 2.04, 0.22 * s, 0.2, 0.2, 0.2, cpick(CANV)]] },
+  board: { L: 3.6, D: 0, parts: s => [[0, 1.95, 0.04 * s, 3.6, 1.5, 0.06, 0x8a6a44], [0, 1.95, 0.08 * s, 3.4, 1.3, 0.04, 0x24503c], [0, 1.24, 0.14 * s, 3.2, 0.06, 0.16, 0x8a6a44], [-1, 2.1, 0.11 * s, 0.9, 0.05, 0.02, 0xf4efe2], [0.6, 1.8, 0.11 * s, 1.2, 0.05, 0.02, 0xf4efe2]] },
+};
+const ROOM_DECOR = { // 방마다 벽에 놓일 수 있는 가구 종류 (없는 방은 벽걸이만)
+  '제1미술실': { floor: ['sinkS', 'desk', 'bookcase', 'lowShelf'], hang: ['picture', 'board', 'wallShelf'] },
+  '제2미술실': { floor: ['desk', 'sinkS', 'lowShelf', 'bookcase'], hang: ['picture', 'board', 'wallShelf'] },
+  '석고상 보관실': { floor: ['lowShelf', 'bookcase'], hang: ['picture', 'wallShelf'] },
+  '화구 창고': { floor: ['lowShelf', 'bookcase', 'lowShelf'], hang: ['wallShelf'] },
+  '세면실': { floor: ['sinkS', 'sinkS', 'lowShelf'], hang: ['wallShelf', 'picture'] },
+  '디자인실': { floor: ['desk', 'bookcase', 'desk', 'lowShelf'], hang: ['board', 'picture', 'wallShelf'] },
+  '도예실': { floor: ['sinkS', 'lowShelf', 'desk'], hang: ['wallShelf', 'picture'] },
+  '미술 준비실': { floor: ['desk', 'bookcase', 'lowShelf'], hang: ['wallShelf', 'picture'] },
+  '사진 암실': { floor: ['desk', 'lowShelf'], hang: ['picture', 'wallShelf'] },
+};
+function decorateWalls() {
+  const wallAt = (x, z) => colliders.some(c => c.h >= WH - 0.01 && c.h < WH + 0.01 && x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1);
+  ROOMS.forEach(r => {
+    if (r.name === '야외 테라스') return;
+    const deco = ROOM_DECOR[r.name] || { floor: [], hang: ['picture'] };
+    [['x', r.z0, 1, r.x0, r.x1], ['x', r.z1, -1, r.x0, r.x1], ['z', r.x0, 1, r.z0, r.z1], ['z', r.x1, -1, r.z0, r.z1]].forEach(([ax, w, s, a, b]) => {
+      const P = (t, d) => ax === 'x' ? [t, w + s * d] : [w + s * d, t];
+      // 벽에서 d0~d1 떨어진 띠 영역(t±half)에 기존 물체가 있는지
+      const busy = (t, half, d0, d1, minH) => { const [xa, za] = P(t - half, d0), [xb, zb] = P(t + half, d1);
+        const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), z0 = Math.min(za, zb), z1 = Math.max(za, zb);
+        return colliders.some(c => c.h >= minH && c.x0 < x1 && c.x1 > x0 && c.z0 < z1 && c.z1 > z0); };
+      for (let t = a + 3 + mapRnd() * 1.5; t < b - 3; t += 4.4 + mapRnd() * 1.8) {
+        if (![-2.4, 0, 2.4].every(d => wallAt(...P(t + d, 0)))) continue; // 문 또는 문 바로 옆
+        let kind = null;
+        if (deco.floor.length && mapRnd() < 0.7) {
+          const k = cpick(deco.floor), it = WALL_ITEMS[k], [cx, cz] = P(t, 0.32 + it.D / 2);
+          if (!busy(t, it.L / 2 + 0.6, 0.36, 0.3 + it.D + 1.6, 0) && !MISSIONS.some(m => Math.hypot(m.x - cx, m.z - cz) < 4)) {
+            furn(cx, cz, ax === 'x' ? 0 : 1, it.parts(s), it.L, it.D, it.H); kind = k; }
+        }
+        if (!kind) { const k = cpick(deco.hang), it = WALL_ITEMS[k]; if (busy(t, it.L / 2, 0.36, 1.0, 1.6)) continue;
+          const [cx, cz] = P(t, 0.3); furn(cx, cz, ax === 'x' ? 0 : 1, it.parts(s), 0); }
+      }
+    });
+  });
+}
+
+// ---- 바닥 소품: 열린 공간에 작은 장애물을 조금씩 (주변 1.9m 이상 비어 있는 곳에만 두어 길을 막지 않음) ----
+function decorateFloor() {
+  const clear = (x, z, hx, hz, pad) => !colliders.some(c => c.x0 < x + hx + pad && c.x1 > x - hx - pad && c.z0 < z + hz + pad && c.z1 > z - hz - pad);
+  const okSpot = (x, z) => !DOORS.some(d => Math.hypot(d[0] - x, d[1] - z) < 4) && !MISSIONS.some(m => Math.hypot(m.x - x, m.z - z) < 4) && !(Math.abs(x) < 12 && z > -3.5 && z < 4.5);
+  const KINDS = { // [반폭, 만드는 함수]
+    stool: [0.25, (x, z) => { box(x, 0.25, z, 0.5, 0.5, 0.5, cpick(BOOKC), true); }],
+    bucket: [0.23, (x, z) => { box(x, 0.22, z, 0.45, 0.44, 0.45, 0x9aa3ad, true); box(x, 0.45, z, 0.36, 0.03, 0.36, cpick(BOOKC)); }],
+    cans: [0.3, (x, z) => { box(x, 0.18, z, 0.6, 0.36, 0.6, cpick(BOOKC), true); box(x + 0.08, 0.5, z - 0.05, 0.3, 0.28, 0.3, cpick(BOOKC)); }],
+    crateS: [0.4, (x, z) => crate(x, z, 0.8)],
+    pot: [0.35, (x, z) => { box(x, 0.3, z, 0.7, 0.6, 0.7, 0x8a5a3a, true); spheres.push([x, 0.95, z, 0.5, 0x4caf50]); }],
+    bench: [1, (x, z, o) => furn(x, z, o, [[0, 0.45, 0, 2, 0.1, 0.5, WOOD], [-0.8, 0.2, 0, 0.1, 0.4, 0.45, 0x555555], [0.8, 0.2, 0, 0.1, 0.4, 0.45, 0x555555]], 2, 0.5, 0.5)],
+  };
+  const room = ['stool', 'bucket', 'cans', 'crateS', 'stool'];
+  const PLAN = { '갤러리 복도': [9, ['bench', 'pot', 'stool', 'pot', 'bench']], '뒷복도': [5, ['crateS', 'bucket', 'cans']], '야외 테라스': [5, ['pot', 'stool', 'bench']],
+    '제1미술실': [3, room], '제2미술실': [4, room], '석고상 보관실': [2, room], '화구 창고': [3, room], '세면실': [4, room], '디자인실': [4, room], '도예실': [4, room], '미술 준비실': [3, room], '사진 암실': [4, room] };
+  ROOMS.forEach(r => { const pl = PLAN[r.name]; if (!pl) return; let n = 0;
+    for (let t = 0; t < pl[0] * 40 && n < pl[0]; t++) {
+      const x = r.x0 + 1.5 + mapRnd() * (r.x1 - r.x0 - 3), z = r.z0 + 1.5 + mapRnd() * (r.z1 - r.z0 - 3), k = cpick(pl[1]), o = mapRnd() < 0.5 ? 0 : 1;
+      const hw = KINDS[k][0], hx = k === 'bench' ? (o ? 0.25 : 1) : hw, hz = k === 'bench' ? (o ? 1 : 0.25) : hw;
+      if (!okSpot(x, z) || !clear(x, z, hx, hz, 1.9)) continue; KINDS[k][1](x, z, o); n++; } });
+  // 미로: 일부 칸의 구석에 작은 전시 받침대 (통로 한쪽은 항상 비워 둠)
+  const C = 9, R = 8, cw = 4, ch = 4.25, skip = new Set(['4,4', '2,0', '6,0', '0,5', '8,1']);
+  for (let j = 0; j < R; j++) for (let i = 0; i < C; i++) { if (skip.has(i + ',' + j) || mapRnd() > 0.22) continue;
+    const x = -36 + cw * (i + 0.5) + (mapRnd() < 0.5 ? -1.25 : 1.25), z = 6 + ch * (j + 0.5) + (mapRnd() < 0.5 ? -1.4 : 1.4);
+    if (!clear(x, z, 0.3, 0.3, 0.05)) continue;
+    box(x, 0.4, z, 0.6, 0.8, 0.6, 0xdadada, true); spheres.push([x, 1.02, z, 0.24, cpick(BOOKC)]); }
+  // 바닥 물감 얼룩(충돌 없음)
+  for (let k = 0; k < 40; k++) { const r = ROOMS[(mapRnd() * 12) | 0], x = r.x0 + 1 + mapRnd() * (r.x1 - r.x0 - 2), z = r.z0 + 1 + mapRnd() * (r.z1 - r.z0 - 2), s = 0.5 + mapRnd() * 0.9;
+    box(x, 0.011, z, s, 0.02, s * (0.6 + mapRnd() * 0.7), cpick(BOOKC)); }
+}
+
+(function buildMap() {
+  ROOMS.forEach(r => box((r.x0 + r.x1) / 2, -0.1, (r.z0 + r.z1) / 2, r.x1 - r.x0, 0.2, r.z1 - r.z0, r.color));
+  // ---- 벽 (괄호 안: [문 중심, 문 폭]) ----
+  wallX(-40, -60, 60); wallX(40, -60, 60); wallZ(-60, -40, 40);
+  wallZ(60, -40, 40, [[-36.5, 3.5], [0, 6], [24, 4]]);
+  wallX(-33, -60, 60, [[-52, 3.5], [-20, 3.5], [4, 3.5], [28, 3.5], [52, 3.5]]);
+  wallX(-6, -60, 60, [[-48, 4], [-24, 4], [0, 4], [24, 4], [48, 4]]);
+  wallX(6, -60, 60, [[-48, 4], [-26, 3.5], [-10, 3.5], [10, 4], [28, 4], [48, 4]]);
+  wallZ(-36, -33, -6, [[-26, 3.5]]); wallZ(-12, -33, -6, [[-13, 3.5]]); wallZ(12, -33, -6, [[-26, 3.5]]); wallZ(36, -33, -6, [[-13, 3.5]]);
+  wallZ(-36, 6, 40, [[29.4, 3.4]]); wallZ(0, 6, 40, [[12.4, 3.4]]); wallZ(20, 6, 40, [[30, 3.5]]); wallZ(36, 6, 40, [[16, 3.5]]);
+  wallX(-40, 60, 84, [], 1.2, FENCE); wallX(40, 60, 84, [], 1.2, FENCE); wallZ(84, -40, 40, [], 1.2, FENCE);
+  // ---- 뒷복도 ----
+  [-44, -30, -8, 16, 40].forEach(x => cabinet(x, -39.3, 0));
+  [-40, -4, 32].forEach(x => partition(x, -38, 3.5, 1)); [-14, 20].forEach(x => partition(x, -35, 3.5, 1));
+  // ---- 제1미술실 ----
+  [[-56, -27, 0], [-56, -20, 0], [-56, -13, 0], [-52, -24, 1], [-44, -24, 1], [-40, -20, 0], [-40, -13, 0], [-44, -15, 0], [-52, -15, 0]].forEach(e => easel(...e));
+  partition(-48, -11, 5, 0); cabinet(-59.2, -30, 1); table(-45, -29.5, 0);
+  // ---- 제2미술실 ----
+  bigBoard(-30, -16, 0); bigBoard(-18, -27, 0); bigBoard(-18, -17, 1);
+  [[-31, -28, 0], [-31, -22, 1], [-16, -10, 0], [-29, -10, 1]].forEach(e => easel(...e));
+  table(-27, -29.5, 0); partition(-24, -11.5, 6, 0);
+  // ---- 석고상 보관실 ----
+  [-8, -4, 4, 8].forEach(x => [-29, -24, -17, -11].forEach(z => plinth(x, z)));
+  cabinet(-1, -30.5, 0); bigBoard(0, -13, 0);
+  // ---- 화구 창고 ----
+  [[18, -29], [31, -29], [17, -24], [31, -24], [17, -15], [31, -17.5], [19, -10], [29.5, -10]].forEach(s => shelf(s[0], s[1], 0));
+  [[14, -9.5], [14, -10.8], [15.2, -9.5], [34, -30], [34, -28.7], [24, -28], [25.2, -28]].forEach(c => crate(c[0], c[1], 1.1));
+  // ---- 세면실 ----
+  [-27, -19, -11].forEach(z => sink(59.1, z, 1)); sink(44, -28.5, 0);
+  partition(40, -22, 5, 0); partition(40, -17.5, 5, 0); partition(53, -13, 5, 0); crate(38, -30.5, 0.9); crate(55, -30, 0.9);
+  // ---- 갤러리 복도 ----
+  bigBoard(-36, -1.5, 1); bigBoard(-12, 1.8, 1); bigBoard(12, -1.8, 1); bigBoard(36, 1.5, 1);
+  [[-54, -4], [-30, 4], [-4.2, -4.4], [20, 4], [44, -4], [-56, 4], [56, 4.3]].forEach(p => plinth(p[0], p[1]));
+  table(-19.5, -4.9, 0); table(31, -4.9, 0);
+  // ---- 디자인실 ----
+  [[-54, 13], [-42, 13], [-54, 20], [-42, 20], [-54, 34], [-42, 35]].forEach(t => table(t[0], t[1], 0));
+  partition(-48, 16.5, 5, 0); bigBoard(-48, 37.5, 0); cabinet(-59.2, 27, 1); easel(-40, 26, 1);
+  // ---- 파티션 미로 전시실 (시드 고정 DFS 미로 + 순환로) ----
+  (function maze() {
+    const C = 9, R = 8, cw = 4, ch = 4.25, ox = -36, oz = 6, rnd = mulberry32(77);
+    const vis = new Uint8Array(C * R), V = new Uint8Array((C - 1) * R).fill(1), H = new Uint8Array(C * (R - 1)).fill(1);
+    const st = [[4, 0]]; vis[4] = 1;
+    while (st.length) {
+      const [i, j] = st[st.length - 1];
+      const nb = [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]].filter(([a, b]) => a >= 0 && b >= 0 && a < C && b < R && !vis[a + b * C]);
+      if (!nb.length) { st.pop(); continue; }
+      const [a, b] = nb[(rnd() * nb.length) | 0];
+      if (a !== i) V[Math.min(a, i) + j * (C - 1)] = 0; else H[i + Math.min(b, j) * C] = 0;
+      vis[a + b * C] = 1; st.push([a, b]);
+    }
+    for (let k = 0; k < 16; k++) { if (rnd() < 0.5) V[(rnd() * V.length) | 0] = 0; else H[(rnd() * H.length) | 0] = 0; }
+    for (let j = 0; j < R; j++) for (let i = 0; i < C - 1; i++) if (V[i + j * (C - 1)]) box(ox + cw * (i + 1), 1.2, oz + ch * (j + 0.5), 0.3, 2.4, ch + 0.3, PASTEL[(rnd() * PASTEL.length) | 0], true);
+    for (let j = 0; j < R - 1; j++) for (let i = 0; i < C; i++) if (H[i + j * C]) box(ox + cw * (i + 0.5), 1.2, oz + ch * (j + 1), cw + 0.3, 2.4, 0.3, PASTEL[(rnd() * PASTEL.length) | 0], true);
+  })();
+  // ---- 도예실 ----
+  kiln(3.8, 37.2); kiln(7.6, 37.2); table(5, 20, 1); table(15, 20, 1); partition(10, 11.5, 5, 0); shelf(16, 38.4, 0); plinth(4, 29); plinth(16, 24);
+  // ---- 미술 준비실 ----
+  cabinet(23.5, 12, 0); cabinet(32, 11, 0); table(28.5, 19, 0); table(29, 26, 0); bigBoard(28, 35, 0); partition(25, 23, 4, 1); cabinet(35.2, 30, 1); crate(21.5, 37.5, 1.2);
+  // ---- 사진 암실 ----
+  partition(44, 21, 8, 0); partition(53, 14, 6, 1); partition(54, 27, 8, 0); partition(42, 31, 6, 1); table(56, 35.5, 0); table(39.5, 37.8, 0); cabinet(59.2, 12, 1); cabinet(45, 9, 1);
+  // ---- 야외 테라스 ----
+  [[66, -12], [78, 10], [68, 30], [80, 34], [72, -34], [81, -36]].forEach(t => tree(t[0], t[1]));
+  [[66, -30], [78, -30], [70, -6], [80, -8], [64, 16], [76, 26]].forEach(p => planter(p[0], p[1]));
+  hedge(70, -14.5, 0); hedge(78.5, -21, 1); hedge(70, 14, 0); hedge(78, 20, 1); hedge(66.5, 6.5, 1);
+  easel(74, -26, 0); easel(70, 22, 1); table(74, 3, 1);
+  // ---- 시작 지점: 비상 투표 버튼 ----
+  box(EMERG.x, 0.5, EMERG.z, 0.9, 1.0, 0.9, 0x39405a, true); box(EMERG.x, 1.03, EMERG.z, 1.0, 0.06, 1.0, 0xffd92e); box(EMERG.x, 1.13, EMERG.z, 0.5, 0.14, 0.5, 0xe53935);
+  // ---- 벽면 소품(싱크대·책상·선반·책꽂이·액자·칠판) 자동 배치 ----
+  decorateWalls();
+  // ---- 바닥 소품(의자·양동이·상자·화분·벤치·미로 받침대·물감 얼룩) ----
+  decorateFloor();
+})();
+
+// 정적 인스턴스 메시
+(function buildStatic() {
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
+  const bm = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff }), boxes.length);
+  boxes.forEach((b, i) => { m4.compose(p.set(b[0], b[1], b[2]), q, s.set(b[3], b[4], b[5])); bm.setMatrixAt(i, m4); bm.setColorAt(i, col.setHex(b[6])); });
+  bm.frustumCulled = false; scene.add(bm);
+  const sm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), spheres.length);
+  spheres.forEach((b, i) => { m4.compose(p.set(b[0], b[1], b[2]), q, s.set(b[3], b[3], b[3])); sm.setMatrixAt(i, m4); sm.setColorAt(i, col.setHex(b[4])); });
+  sm.frustumCulled = false; scene.add(sm);
+})();
+
+const tallColliders = colliders.filter(c => c.h >= 1.8); // 시야를 가리는 엄폐물
+function blockedAt(x, z, r) { for (let i = 0; i < colliders.length; i++) { const c = colliders[i]; if (x > c.x0 - r && x < c.x1 + r && z > c.z0 - r && z < c.z1 + r) return true; } return false; }
+// 선분-AABB 교차 (시야 판정)
+function sightBlocked(x0, z0, x1, z1) {
+  const dx = x1 - x0, dz = z1 - z0;
+  for (let i = 0; i < tallColliders.length; i++) {
+    const c = tallColliders[i]; let t0 = 0, t1 = 1;
+    if (Math.abs(dx) < 1e-9) { if (x0 < c.x0 || x0 > c.x1) continue; }
+    else { let a = (c.x0 - x0) / dx, b = (c.x1 - x0) / dx; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
+    if (Math.abs(dz) < 1e-9) { if (z0 < c.z0 || z0 > c.z1) continue; }
+    else { let a = (c.z0 - z0) / dz, b = (c.z1 - z0) / dz; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
+    return true;
+  }
+  return false;
+}
+const roomAt = (x, z) => { for (const r of ROOMS) if (x >= r.x0 && x < r.x1 && z >= r.z0 && z < r.z1) return r.name; return ''; };
+
+/* =====================================================================
+ * 3. 미션 3D 마커
+ * ===================================================================== */
+function textSprite(lines, w, h, scale) {
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  lines.forEach(l => { const F = n => `bold ${n}px system-ui,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif`; let sz = l.size; g.font = F(sz);
+    while (g.measureText(l.text).width > w - 14 && sz > 14) { sz -= 2; g.font = F(sz); } // 긴 닉네임은 글자를 줄여 맞춤
+    g.lineWidth = l.size / 4; g.strokeStyle = l.stroke || 'rgba(0,0,0,.85)'; g.strokeText(l.text, w / 2, l.y); g.fillStyle = l.color || '#fff'; g.fillText(l.text, w / 2, l.y); });
+  const tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sp.scale.set(scale, scale * h / w, 1); return sp;
+}
+const ringGeo = new THREE.RingGeometry(1.0, 1.5, 28), discGeo = new THREE.CircleGeometry(1.0, 20), coneGeo = new THREE.ConeGeometry(0.35, 0.8, 4);
+MISSIONS.forEach(m => {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffd92e, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  m.ring = new THREE.Mesh(ringGeo, mat); m.ring.rotation.x = -Math.PI / 2; m.ring.position.set(m.x, 0.06, m.z);
+  m.disc = new THREE.Mesh(discGeo, new THREE.MeshBasicMaterial({ color: 0xffd92e, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  m.disc.rotation.x = -Math.PI / 2; m.disc.position.set(m.x, 0.05, m.z);
+  m.cone = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({ color: 0xffd92e })); m.cone.rotation.x = Math.PI; m.cone.position.set(m.x, 3.0, m.z);
+  m.label = textSprite([{ text: '미션 수행하기', size: 50, y: 46, color: '#ffe45c' }, { text: m.name, size: 34, y: 108 }], 512, 144, 5.2);
+  m.label.position.set(m.x, 4.3, m.z);
+  scene.add(m.ring, m.disc, m.cone, m.label);
+});
+{ // 비상 투표 버튼 표시
+  const lab = textSprite([{ text: '🚨 비상 투표', size: 46, y: 40, color: '#ff8080' }], 384, 80, 3.6); lab.position.set(EMERG.x, 2.3, EMERG.z);
+  const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.set(EMERG.x, 0.06, EMERG.z); scene.add(lab, ring);
+}
+function styleMarkers() { // 내 미션은 노랑, 완료는 초록, 남의 미션은 흐리게
+  MISSIONS.forEach((m, idx) => {
+    let col = 0x7fd4ff, strong = true;
+    if (G.phase === 'lobby' || U.ghost) { col = 0x8899aa; strong = false; } // 대기방·사망자는 미션 없음
+    else if (U.mode === 'student') { const k = U.me.missions.indexOf(idx); if (k < 0) { col = 0x8899aa; strong = false; } else if (U.me.done[k]) { col = 0x3ddc84; strong = false; } else col = 0xffd92e; }
+    else if (U.mode === 'zombie') col = 0xff9d3c;
+    m.ring.material.color.setHex(col); m.disc.material.color.setHex(col); m.cone.material.color.setHex(col);
+    m.ring.material.opacity = strong ? 0.9 : 0.3; m.cone.visible = strong; m.label.visible = strong; m.strong = strong;
+  });
+}
+
+/* =====================================================================
+ * 4. 아바타 (팔·다리 달린 로우폴리 인간형, InstancedMesh 2개로 30명 렌더)
+ * ===================================================================== */
+const N = CFG.maxPlayers;
+const partMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff }), N * 5);
+const headMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), N);
+partMesh.frustumCulled = headMesh.frustumCulled = false; scene.add(partMesh, headMesh);
+const _root = new THREE.Matrix4(), _m = new THREE.Matrix4(), _t = new THREE.Matrix4(), _zero = new THREE.Matrix4().makeScale(0, 0, 0), _col = new THREE.Color();
+function hideAllAvatars() { for (let i = 0; i < N * 5; i++) partMesh.setMatrixAt(i, _zero); for (let i = 0; i < N; i++) headMesh.setMatrixAt(i, _zero); }
+function paintAvatar(slot, color) {
+  _col.setHex(color); partMesh.setColorAt(slot * 5, _col); partMesh.setColorAt(slot * 5 + 1, _col); partMesh.setColorAt(slot * 5 + 2, _col);
+  _col.multiplyScalar(0.62); partMesh.setColorAt(slot * 5 + 3, _col); partMesh.setColorAt(slot * 5 + 4, _col);
+  headMesh.setColorAt(slot, _col.setHex(0xf3d2b3));
+}
+for (let i = 0; i < N; i++) paintAvatar(i, COLORS[i][1]); hideAllAvatars();
+function setLimb(idx, px, py, pz, swing, oy, sx, sy, sz) {
+  _m.makeRotationX(swing); _m.setPosition(px, py, pz);
+  _t.makeTranslation(0, oy, 0); _m.multiply(_t); _t.makeScale(sx, sy, sz); _m.multiply(_t);
+  _m.premultiply(_root); partMesh.setMatrixAt(idx, _m);
+}
+function drawAvatar(p, time) {
+  const b = p.id * 5;
+  if (!p.vis || (!p.alive && !p.corpse)) { for (let k = 0; k < 5; k++) partMesh.setMatrixAt(b + k, _zero); headMesh.setMatrixAt(p.id, _zero); p.sprite.visible = false; return; }
+  let leg = 0, armL = 0, armR = 0;
+  if (p.alive) {
+    _root.makeRotationY(p.yaw); _root.setPosition(p.x, p.y, p.z);
+    if (p.y > 0) { leg = 0.45; armL = armR = -2.6; } // 점프 중
+    else if (p.moving) { leg = Math.sin(p.phase) * 0.85; armL = -leg * 0.8; armR = leg * 0.8; }
+    else if (p.working) { armL = -1.25 + Math.sin(time * 9 + p.id) * 0.25; armR = -1.25 + Math.cos(time * 9 + p.id) * 0.25; }
+    p.sprite.visible = true; p.sprite.position.set(p.x, 2.45 + p.y, p.z);
+  } else { // 시체: 뒤로 쓰러진 자세
+    _root.makeRotationY(p.corpse.yaw); _t.makeRotationX(-Math.PI / 2); _root.multiply(_t); _root.setPosition(p.corpse.x, 0.2, p.corpse.z);
+    armL = 0.5; armR = -0.4; leg = 0.25; p.sprite.visible = false;
+  }
+  setLimb(b, 0, 1.05, 0, 0, 0, 0.6, 0.7, 0.34);            // 몸통
+  setLimb(b + 1, -0.39, 1.36, 0, armL, -0.28, 0.16, 0.62, 0.16); // 왼팔
+  setLimb(b + 2, 0.39, 1.36, 0, armR, -0.28, 0.16, 0.62, 0.16);  // 오른팔
+  setLimb(b + 3, -0.15, 0.7, 0, leg, -0.35, 0.22, 0.7, 0.22);    // 왼다리
+  setLimb(b + 4, 0.15, 0.7, 0, -leg, -0.35, 0.22, 0.7, 0.22);    // 오른다리
+  _m.makeScale(0.27, 0.27, 0.27); _m.setPosition(0, 1.68, 0); _m.premultiply(_root); headMesh.setMatrixAt(p.id, _m);
+}
+
+/* =====================================================================
+ * 5. 게임 상태
+ * ===================================================================== */
+/* AI 훅: 코어는 봇의 존재를 모릅니다. 아래 기본값(아무 일도 안 함)을 "AI BOT MODULE"이 덮어씁니다.
+ * 봇은 방장 기기에서만 돌아가며, 방장이 대기방에서 "AI 봇 채우기"를 켰을 때만 생성됩니다. */
+const AI = {
+  available: false,             // 봇 모듈이 설치되어 있는지
+  initPlayer(p) {},             // 봇 전용 필드 초기화
+  onLobby() {},                 // 대기방에 봇이 채워진 직후
+  onRoundStart() {},            // 라운드 시작 시
+  update(dt) {},                // 매 프레임(방장 기기)
+  vote1(p) { return -1; },      // 1차 투표: 지목할 player id (-1 = 스킵)
+  vote2(p, cand) { return false; }, // 2차 투표: 찬성 여부
+  onKill(killer, victim) {},    // 처치 발생(목격 처리)
+  onDefenseStart(cand) {},      // 최후 변론 시작(봇 채팅)
+  onAccuse(cand, w) {},         // 누군가 후보를 고발하는 채팅을 함
+};
+let players = [];               // 방장: 실제 상태 / 참가자: 방장이 보내 준 복제본
+const byId = id => { for (let i = 0; i < players.length; i++) if (players[i].id === id) return players[i]; return null; };
+const U = { mode: null, me: null, ghost: false, fp: { x: 0, y: 22, z: 26 }, yaw: Math.PI, pitch: -0.85, dist: 11 };
+const G = { phase: 'menu', t: 0, round: 0, voteNo: 0, paused: false, cand: null, userVote: undefined, hasZombies: false, stat: { done: 0, total: 0 }, accusedBy: new Set() };
+let timers = [];
+const after = (sec, fn) => timers.push({ t: sec, fn });
+const isFree = () => U.mode === 'host' || U.ghost;
+const userCanVote = () => U.mode !== 'host' && !!U.me && U.me.alive;
+const aliveList = () => players.filter(p => p.alive);
+const chip = p => `<span class="inline-block w-3 h-3 rounded-full border border-white/50 shrink-0" style="display:inline-block;width:.75rem;height:.75rem;border-radius:50%;background:${hex(p.color)}"></span>`;
+const cleanNick = s => String(s || '').replace(/[<>&"'`\\]/g, '').trim().slice(0, 8);
+
+// 시작 지점: id(=슬롯 번호)로 정해지므로 모든 기기가 같은 자리를 계산함
+const spawnOf = id => [-9 + (id % 10) * 2, -1.5 + ((id / 10) | 0) * 2];
+function toSpawn(p) { const s = spawnOf(p.id); p.x = p.tx = s[0]; p.z = p.tz = s[1]; p.y = p.ty = 0; p.vy = 0; p.yaw = p.tyaw = 0; p.moving = false; p.working = false; p.posHold = 0.4; }
+function nameSprite(p) {
+  if (p.sprite) { scene.remove(p.sprite); p.sprite.material.map.dispose(); p.sprite.material.dispose(); }
+  const mate = G.phase !== 'lobby' && U.mode === 'zombie' && p.role === 'zombie';
+  p.sprite = textSprite([{ text: p.isUser ? `${p.name} (나)` : p.name, size: 40, y: 34, color: mate ? '#ff6b6b' : '#ffffff' }], 256, 64, 2.6);
+  scene.add(p.sprite);
+}
+function resetPlayer(p) { Object.assign(p, { role: 'student', alive: true, ejected: false, left: false, corpse: null, missions: [], done: [], killCd: 0, tpCd: 0, emerg: 0, netVote1: -1, netVote2: false, voted: false }); }
+// d = { id, name, color, bot }.  id 는 0~29 의 슬롯 번호(아바타 인스턴스 번호와 같음)
+function makePlayer(d, isUser) {
+  const p = { id: d.id, name: d.name, color: d.color, isUser: !!isUser, isBot: !!d.bot, remote: false,
+    x: 0, y: 0, z: 0, vy: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0, posHold: 0, phase: Math.random() * 6, moving: false, working: false, vis: true, sprite: null };
+  resetPlayer(p); toSpawn(p); paintAvatar(p.id, p.color); nameSprite(p);
+  if (partMesh.instanceColor) partMesh.instanceColor.needsUpdate = true; if (headMesh.instanceColor) headMesh.instanceColor.needsUpdate = true;
+  return p;
+}
+function dropPlayer(p) {
+  if (p.sprite) { scene.remove(p.sprite); p.sprite.material.map.dispose(); p.sprite.material.dispose(); p.sprite = null; }
+  for (let k = 0; k < 5; k++) partMesh.setMatrixAt(p.id * 5 + k, _zero); headMesh.setMatrixAt(p.id, _zero);
+}
+function clearPlayers() { players.forEach(dropPlayer); players = []; hideAllAvatars(); }
+function resetCommon() {
+  timers = []; closeMini(true); meetHide(); ['end', 'start', 'reveal'].forEach(id => $(id).classList.add('hidden'));
+  U.ghost = false; U.yaw = Math.PI; U.pitch = -0.85; U.fp = { x: 0, y: 22, z: 26 };
+  G.phase = 'lobby'; G.t = 0; G.round = 0; G.voteNo = 0; G.paused = false; G.cand = null; G.hasZombies = false; G.stat = { done: 0, total: 0 };
+}
+// 사망·추방된 학생은 관전만 하므로 미션 집계에서 빠집니다(살아 있는 학생 전원이 완료하면 학생 승리)
+function missionStats() {
+  if (!isHost()) return G.stat; // 참가자는 방장이 보내 준 값 사용
+  let done = 0, total = 0; players.forEach(p => { if (p.role === 'student' && p.alive) { total += p.done.length; done += p.done.filter(Boolean).length; } }); return { done, total };
+}
+function markDead(v, cx, cz, cw) { v.alive = false; v.corpse = { x: cx, z: cz, yaw: cw }; v.moving = false; v.working = false; v.y = 0; if (v.isUser) userBecomesGhost('좀비에게 처치당했습니다. 이제 관전만 할 수 있습니다'); }
+function userBecomesGhost(msg) {
+  closeMini(true); U.ghost = true; U.fp = { x: U.me.x, y: 2.2, z: U.me.z }; U.pitch = -0.15; toast(msg, 4);
+  $('fabs').classList.add('hidden'); $('btnJump').classList.add('hidden'); styleMarkers(); // 사망자: 미션·공격·신고·채팅·투표 불가, 관전만
+}
+function showEnd(winner, reason, hasZ, zids) {
+  G.phase = 'ended'; timers = []; closeMini(true); meetHide(); $('reveal').classList.add('hidden');
+  zids.forEach(id => { const p = byId(id); if (p) p.role = 'zombie'; });
+  const mine = U.mode === 'host' ? null : U.me.role === winner;
+  $('endTitle').textContent = winner === 'student' ? '🎉 학생 승리!' : (hasZ ? '🧟 좀비 승리!' : '⏰ 미션 실패');
+  $('endTitle').className = 'text-3xl font-black mb-1 ' + (winner === 'student' ? 'text-emerald-400' : 'text-rose-400');
+  $('endReason').textContent = reason + (mine === null || !hasZ ? '' : mine ? ' — 당신의 팀이 이겼습니다' : ' — 당신의 팀이 졌습니다');
+  const zl = zids.map(byId).filter(Boolean);
+  $('endRoles').innerHTML = zl.length ? '<div class="text-slate-400 text-xs mb-1">좀비의 정체</div>' + zl.map(p => `<span class="inline-flex items-center gap-1 mx-1">${chip(p)} ${p.name}${p.isUser ? '(나)' : ''}</span>`).join('') : '';
+  $('endBtn').classList.toggle('hidden', !isHost()); $('endWait').classList.toggle('hidden', isHost());
+  $('end').classList.remove('hidden');
+}
+
+/* =====================================================================
+ * 6. 네트워크 — PeerJS(WebRTC) 스타 구조
+ *   · 방장 기기가 "서버" 역할: 규칙·역할·미션 집계·공격 판정·투표·승패를 모두 방장 기기에서 결정
+ *   · 참가자 기기: 자기 아바타 이동과 미니게임만 직접 처리하고, 나머지는 방장에게 요청 → 결과를 받아 표시
+ *   · 방 코드 6자리 → PeerJS ID (PEER_PREFIX + 코드). 신호 서버는 PeerJS 공개 클라우드(기본값)
+ *
+ *   참가자 → 방장:  join / pos / lchat / chat / mdone / kill / report / emerg / vote1 / vote2
+ *   방장 → 참가자:  welcome / reject / roster / cfg / lobby / lchat / s(위치 스냅샷) / begin / round /
+ *                   kill / kcd / left / vote1 / vote1r / defense / chat / vote2 / vote2r / eject / end
+ * ===================================================================== */
+const PEER_PREFIX = 'artroom-zombie-v1-';
+const PEER_OPTS = {}; // 자체 PeerServer·TURN 서버를 쓸 때: { host:'내서버', port:443, path:'/', secure:true, config:{ iceServers:[...] } }
+const NET = { role: null, peer: null, code: '', conns: new Map(), host: null, myId: -1, acc: 0, perm: [], bots: false, joining: false };
+const isHost = () => NET.role === 'host';
+const netMsg = t => { $('netMsg').textContent = t || ''; };
+function netSend(conn, m) { try { if (conn && conn.open) conn.send(m); } catch (_) {} }
+function broadcast(m) { NET.conns.forEach(c => netSend(c, m)); }
+const sendTo = (id, m) => netSend(NET.conns.get(id), m);
+const toHost = m => netSend(NET.host, m);
+const CFG_KEYS = ['missionTime', 'defenseTime', 'maxVotes', 'zombies', 'killCooldown', 'teleportCooldown', 'emergPer', 'emergDelay', 'chatMode'];
+const cfgData = () => { const o = {}; CFG_KEYS.forEach(k => { o[k] = CFG[k]; }); return o; };
+const applyCfg = c => { if (c) CFG_KEYS.forEach(k => { if (k in c) CFG[k] = c[k]; }); };
+const rosterData = () => players.map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.isBot ? 1 : 0 }));
+const humans = () => players.filter(p => !p.isBot);
+
+// ───────────── 방 만들기 (방장) ─────────────
+function hostCreateRoom(tries) {
+  if (typeof Peer === 'undefined') { netMsg('멀티플레이 모듈(PeerJS)을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'); return; }
+  if (NET.joining) return; NET.joining = true; netMsg('방을 만드는 중…');
+  const code = String(100000 + Math.floor(Math.random() * 900000)), peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
+  peer.on('open', () => { NET.joining = false; netMsg(''); NET.role = 'host'; NET.peer = peer; NET.code = code; NET.conns = new Map(); NET.perm = shuffle([...Array(N).keys()]); clearPlayers(); hostEnterLobby(); });
+  peer.on('connection', conn => {
+    conn.on('data', m => { try { hostOnMsg(conn, m); } catch (e) { console.error(e); } });
+    conn.on('close', () => hostOnLeave(conn)); conn.on('error', () => hostOnLeave(conn));
+  });
+  peer.on('disconnected', () => { try { if (NET.peer === peer) peer.reconnect(); } catch (_) {} }); // 신호 서버만 끊긴 경우(기존 연결은 유지됨)
+  peer.on('error', err => {
+    if (NET.role === 'host') { console.warn('peer error', err && err.type); return; }
+    NET.joining = false; try { peer.destroy(); } catch (_) {}
+    if (err && err.type === 'unavailable-id' && (tries || 0) < 5) hostCreateRoom((tries || 0) + 1); // 코드 중복 → 다시 뽑기
+    else netMsg('방을 만들지 못했습니다 (' + (err && err.type || '알 수 없는 오류') + ')');
+  });
+}
+function hostAddPlayer(name, bot) {
+  let id = 0; while (id < N && byId(id)) id++; if (id >= N) return null;
+  const c = COLORS[NET.perm[id]], p = makePlayer({ id, name: bot ? c[0] : name, color: c[1], bot }, false);
+  p.remote = !bot; if (bot) AI.initPlayer(p); players.push(p); return p;
+}
+function hostRemovePlayer(p) { dropPlayer(p); players = players.filter(x => x !== p); }
+function hostSetBots(on) { // 테스트용: 빈 자리를 AI 봇으로 채우거나 모두 제거
+  if (!isHost() || G.phase !== 'lobby') return;
+  NET.bots = !!on && AI.available;
+  if (NET.bots) { while (players.length < N && hostAddPlayer(null, true)); AI.onLobby(); } else players.filter(p => p.isBot).forEach(hostRemovePlayer);
+  broadcast({ t: 'roster', roster: rosterData() });
+}
+function hostEnterLobby() { // 방을 처음 열었을 때 / 게임이 끝나고 대기방으로 돌아올 때
+  resetCommon(); U.mode = 'host'; U.me = null; U.pitch = -0.6;
+  players.filter(p => p.left).forEach(hostRemovePlayer);
+  players.forEach(p => { resetPlayer(p); toSpawn(p); nameSprite(p); if (p.isBot) AI.initPlayer(p); });
+  if (NET.bots) { while (players.length < N && hostAddPlayer(null, true)); AI.onLobby(); }
+  $('hud').classList.remove('hidden'); $('hostPanel').classList.remove('hidden');
+  ['waitPanel', 'fabs', 'btnJump'].forEach(id => $(id).classList.add('hidden'));
+  $('hostStart').disabled = false; $('hostStart').classList.remove('opacity-40'); $('hostPause').textContent = '일시정지'; $('hostChat').value = CFG.chatMode; $('roomCode').textContent = NET.code; $('hostBots').checked = NET.bots;
+  $('lcLog').innerHTML = ''; lcUnread = 0; lcOpen = !touchUI;
+  lobbyChatAdd('', 0, `방이 열렸습니다. 입장 코드 ${NET.code} 를 학생들에게 알려 주세요.`, true);
+  styleMarkers(); refreshLobbyChat();
+  broadcast({ t: 'lobby', roster: rosterData(), cfg: cfgData() });
+  toast(`입장 코드: ${NET.code}`, 4);
+}
+function hostOnLeave(conn) {
+  if (conn.pid == null || NET.conns.get(conn.pid) !== conn) return;
+  NET.conns.delete(conn.pid); const p = byId(conn.pid); conn.pid = null; if (!p) return;
+  if (G.phase === 'lobby') { hostRemovePlayer(p); if (NET.bots) hostAddPlayer(null, true); broadcast({ t: 'roster', roster: rosterData() }); hostLobbySys(`${p.name} 님이 나갔습니다`); return; }
+  p.left = true; // 게임 중 이탈: 시체 없이 퇴장 처리
+  if (p.alive) { p.alive = false; p.ejected = true; p.corpse = null; broadcast({ t: 'left', id: p.id }); toast(`${p.name} 님의 연결이 끊어졌습니다`); if (!checkWin()) hostMaybeFinishVote(); }
+}
+function hostOnMsg(conn, m) {
+  if (!m || typeof m !== 'object') return;
+  if (m.t === 'join') {
+    if (conn.pid != null) return;
+    if (G.phase !== 'lobby') { netSend(conn, { t: 'reject', why: '이미 게임이 진행 중인 방입니다. 다음 판을 기다려 주세요.' }); return; }
+    if (humans().length >= N) { netSend(conn, { t: 'reject', why: '방이 가득 찼습니다 (30명)' }); return; }
+    if (players.length >= N) { const b = players.find(x => x.isBot); if (b) hostRemovePlayer(b); } // 봇 자리를 사람에게 양보
+    let name = cleanNick(m.name) || '학생', k = 2; const base = name.slice(0, 7);
+    while (players.some(x => x.name === name)) name = base + (k++);
+    const p = hostAddPlayer(name, false); if (!p) { netSend(conn, { t: 'reject', why: '방이 가득 찼습니다' }); return; }
+    conn.pid = p.id; NET.conns.set(p.id, conn);
+    netSend(conn, { t: 'welcome', id: p.id, code: NET.code, cfg: cfgData(), roster: rosterData() });
+    broadcast({ t: 'roster', roster: rosterData() }); hostLobbySys(`${p.name} 님이 입장했습니다`); return;
+  }
+  const p = conn.pid == null ? null : byId(conn.pid); if (!p) return;
+  const mission = G.phase === 'mission' && !G.paused, near = (ax, az, bx, bz, d) => Math.hypot(ax - bx, az - bz) < d;
+  switch (m.t) {
+    case 'pos': // 참가자가 보낸 자기 위치
+      if (!p.alive || p.posHold > 0 || !isFinite(m.x) || !isFinite(m.z)) break;
+      p.tx = clamp(+m.x, MAP.x0, MAP.x1); p.tz = clamp(+m.z, MAP.z0, MAP.z1); p.ty = clamp(+m.y || 0, 0, 3); p.tyaw = +m.w || 0; p.moving = !!(m.f & 1); p.working = !!(m.f & 2); break;
+    case 'lchat': hostLobbySay(p, String(m.x || '').slice(0, 60)); break;
+    case 'chat': { const x = String(m.x || '').trim().slice(0, 80); if (!x || !say(p, x)) break;
+      if (p !== G.cand && /봤|목격|좀비|범인/.test(x) && !G.accusedBy.has(p.id)) { G.accusedBy.add(p.id); AI.onAccuse(G.cand, 0.2); } break; }
+    case 'mdone': if (mission && p.alive && p.role === 'student' && p.done[m.k] === false) { p.done[m.k] = true; checkWin(); } break;
+    case 'kill': { const v = byId(m.v); // 공격 판정은 방장 기기가 확정
+      if (mission && p.alive && p.role === 'zombie' && p.killCd <= 0.35 && v && v.alive && v.role === 'student' && near(p.tx, p.tz, v.x, v.z, CFG.killRange + 2.5)) kill(p, v); break; }
+    case 'report': { const c = byId(m.c); if (mission && p.alive && c && !c.alive && c.corpse && near(p.tx, p.tz, c.corpse.x, c.corpse.z, 7)) startVote1(`${p.name} 님이 ${c.name}의 시체를 신고했습니다`); break; }
+    case 'emerg': if (mission && p.alive && p.emerg < CFG.emergPer && CFG.missionTime - G.t >= CFG.emergDelay - 0.5 && near(p.tx, p.tz, EMERG.x, EMERG.z, 6)) { p.emerg++; startVote1(`${p.name} 님이 비상 투표를 소집했습니다`); } break;
+    case 'vote1': if (G.phase === 'vote1' && p.alive && !p.voted) { p.voted = true; p.netVote1 = m.v | 0; hostMaybeFinishVote(); } break;
+    case 'vote2': if (G.phase === 'vote2' && p.alive && !p.voted) { p.voted = true; p.netVote2 = !!m.y; hostMaybeFinishVote(); } break;
+  }
+}
+function hostMaybeFinishVote() { // 살아 있는 사람이 모두 투표하면 시간을 기다리지 않고 마감
+  if (G.phase !== 'vote1' && G.phase !== 'vote2') return;
+  const h = players.filter(p => p.alive && !p.isBot); if (!h.length || !h.every(p => p.voted)) return;
+  if (G.phase === 'vote1') finishVote1(); else finishVote2();
+}
+
+// ───────────── 방 입장 (참가자) ─────────────
+function clientJoin(code, nick) {
+  if (typeof Peer === 'undefined') { netMsg('멀티플레이 모듈(PeerJS)을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'); return; }
+  if (NET.joining) return; NET.joining = true; netMsg('방에 연결하는 중…');
+  const peer = new Peer(undefined, PEER_OPTS); let settled = false;
+  const fail = msg => { if (settled) return; settled = true; NET.joining = false; netMsg(msg); try { peer.destroy(); } catch (_) {} };
+  peer.on('open', () => {
+    const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' });
+    conn.on('open', () => conn.send({ t: 'join', name: nick }));
+    conn.on('data', m => {
+      if (m && m.t === 'reject') { fail(m.why || '입장이 거절되었습니다'); return; }
+      if (m && m.t === 'welcome') { settled = true; NET.joining = false; netMsg(''); NET.role = 'client'; NET.peer = peer; NET.host = conn; NET.code = m.code; NET.myId = m.id; }
+      if (NET.role === 'client' && NET.host === conn) { try { clientOnMsg(m); } catch (e) { console.error(e); } }
+    });
+    const lost = () => { if (NET.role === 'client' && NET.host === conn) leaveRoom('방장과의 연결이 끊어졌습니다'); else fail('방에 연결할 수 없습니다'); };
+    conn.on('close', lost); conn.on('error', lost);
+  });
+  peer.on('error', err => { if (NET.role === 'client') { console.warn('peer error', err && err.type); return; } fail(err && err.type === 'peer-unavailable' ? '해당 입장 코드의 방을 찾을 수 없습니다' : '연결하지 못했습니다 (' + (err && err.type || '알 수 없는 오류') + ')'); });
+  setTimeout(() => fail('연결 시간이 초과되었습니다. 코드와 네트워크를 확인해 주세요.'), 15000);
+}
+function syncRoster(list) { // 방장이 보낸 명단으로 복제본 갱신
+  const old = new Map(players.map(p => [p.id, p])), next = [];
+  list.forEach(d => { let p = old.get(d.id);
+    if (p && p.name === d.name && p.color === d.color) old.delete(d.id);
+    else { if (p) { dropPlayer(p); old.delete(d.id); } p = makePlayer(d, d.id === NET.myId); p.remote = d.id !== NET.myId; }
+    next.push(p); });
+  old.forEach(dropPlayer); players = next; U.me = byId(NET.myId);
+}
+function clientEnterLobby(roster, cfg) {
+  resetCommon(); applyCfg(cfg); clearPlayers(); U.mode = 'student'; syncRoster(roster);
+  $('hud').classList.remove('hidden'); $('hostPanel').classList.add('hidden'); $('waitPanel').classList.remove('hidden');
+  $('fabs').classList.remove('hidden'); $('btnJump').classList.remove('hidden'); $('btnKill').classList.add('hidden');
+  $('lcLog').innerHTML = ''; lcUnread = 0; lcOpen = !touchUI;
+  lobbyChatAdd('', 0, '대기방에 입장했습니다. 방장이 시작할 때까지 기다려 주세요.', true);
+  styleMarkers(); refreshLobbyChat(); toast(`${U.me.name} 님, 대기방에 입장했습니다`, 3.5);
+}
+function clientOnMsg(m) {
+  if (!m || typeof m !== 'object') return; const me = U.me;
+  switch (m.t) {
+    case 'welcome': case 'lobby': clientEnterLobby(m.roster, m.cfg); break;
+    case 'roster': syncRoster(m.roster); break;
+    case 'cfg': applyCfg(m.cfg); refreshLobbyChat(); refreshChatUI(); break;
+    case 'lchat': { const p = byId(m.id); if (m.sys) lobbyChatAdd('', 0, m.x, true); else if (m.id < 0) lobbyChatAdd('👑 방장', 0xffd92e, m.x); else if (p) lobbyChatAdd(p.name + (p.isUser ? '(나)' : ''), p.color, m.x); break; }
+    case 's': { // 위치 스냅샷 [id, x*100, z*100, y*100, yaw*100, 플래그] × n
+      const a = m.p || []; for (let i = 0; i + 5 < a.length; i += 6) { const p = byId(a[i]); if (!p || p === me) continue;
+        p.tx = a[i + 1] / 100; p.tz = a[i + 2] / 100; p.ty = a[i + 3] / 100; p.tyaw = a[i + 4] / 100; p.moving = !!(a[i + 5] & 1); p.working = !!(a[i + 5] & 2); }
+      if (typeof m.g === 'number' && Math.abs(G.t - m.g) > 0.4) G.t = m.g; G.stat = { done: m.d | 0, total: m.n | 0 }; G.paused = !!m.z; break; }
+    case 'begin': { // 역할 배정(내 역할과, 내가 좀비일 때만 동료 좀비 목록을 받음)
+      applyCfg(m.cfg); timers = []; G.hasZombies = !!m.hz; G.phase = 'mission';
+      players.forEach(p => { p.role = 'student'; }); (m.mates || []).forEach(id => { const p = byId(id); if (p) p.role = 'zombie'; });
+      me.role = m.role; me.missions = m.missions; me.done = m.missions.map(() => false); me.killCd = 0; me.emerg = 0; me.tpCd = 0;
+      U.mode = me.role; const z = U.mode === 'zombie'; if (z) players.forEach(p => { if (p.role === 'zombie') nameSprite(p); });
+      $('waitPanel').classList.add('hidden'); $('btnKill').classList.toggle('hidden', !z); refreshLobbyChat(); styleMarkers();
+      $('revealT').textContent = z ? '🧟 좀비' : '🧑‍🎨 학생'; $('revealT').className = 'text-5xl font-black ' + (z ? 'text-rose-400' : 'text-emerald-400');
+      $('revealS').textContent = z ? '학생인 척하며 들키지 않게 학생들을 처치하세요.' : (G.hasZombies ? '노란 마커의 미션 3개를 완료하고, 숨어 있는 좀비를 찾아내세요.' : '연습 모드: 노란 마커의 미션 3개를 완료하세요.');
+      $('reveal').classList.remove('hidden'); after(3, () => $('reveal').classList.add('hidden')); break; }
+    case 'round': G.phase = 'mission'; G.round = m.r; G.t = m.time; G.cand = null; meetHide();
+      players.forEach(p => { p.corpse = null; if (p.alive) toSpawn(p); });
+      if (me) me.killCd = Math.max(me.killCd, Math.min(CFG.firstKillDelay, CFG.killCooldown));
+      toast(`미션 라운드 ${G.round} 시작!`); break;
+    case 'kill': { const v = byId(m.v); if (v && v.alive) markDead(v, m.x, m.z, m.w); break; }
+    case 'kcd': if (me) { me.killCd = CFG.killCooldown; toast('처치했습니다'); } break;
+    case 'left': { const p = byId(m.id); if (p) { p.alive = false; p.ejected = true; p.corpse = null; toast(`${p.name} 님의 연결이 끊어졌습니다`); } break; }
+    case 'vote1': closeMini(true); G.phase = 'vote1'; G.voteNo = m.no; G.t = m.time; G.userVote = undefined; freezeAll(); uiVote1(m.reason); break;
+    case 'vote1r': G.phase = 'vote1r'; uiVote1Result(m.rows, m.skip, m.cand); break;
+    case 'defense': G.phase = 'defense'; G.cand = byId(m.c); G.t = m.time; uiDefense(); break;
+    case 'chat': { const p = byId(m.id); if (m.sys) chatAdd(null, m.x, true); else if (p) chatAdd(p, m.x); break; }
+    case 'vote2': G.phase = 'vote2'; G.t = m.time; G.userVote = undefined; uiVote2(); break;
+    case 'vote2r': G.phase = 'vote2r'; uiVote2Result(m.yes, m.no, m.out); break;
+    case 'eject': { const c = byId(m.id); if (!c) break; c.alive = false; c.ejected = true; c.corpse = null; c.role = m.role; uiEject(c);
+      if (c.isUser && !U.ghost) userBecomesGhost('추방당했습니다. 이제 관전만 할 수 있습니다'); break; }
+    case 'end': showEnd(m.w, m.reason, m.hz, m.z || []); break;
+  }
+}
+// 방 나가기(참가자·방장 공용). 방장이 나가면 방이 닫힘
+function leaveRoom(msg) {
+  const peer = NET.peer; NET.role = null; NET.peer = null; NET.host = null; NET.conns = new Map(); NET.myId = -1; NET.code = ''; NET.joining = false;
+  try { if (peer) peer.destroy(); } catch (_) {}
+  timers = []; closeMini(true); meetHide(); clearPlayers(); U.me = null; U.mode = null; U.ghost = false; G.phase = 'menu';
+  ['end', 'hud', 'hostPanel', 'waitPanel', 'fabs', 'btnJump', 'reveal'].forEach(id => $(id).classList.add('hidden')); refreshLobbyChat();
+  $('start').classList.remove('hidden'); netMsg(msg || '');
+}
+addEventListener('pagehide', () => { try { if (NET.peer) NET.peer.destroy(); } catch (_) {} });
+// 주기적 동기화: 방장 → 전원 위치 스냅샷(약 8Hz), 참가자 → 자기 위치(약 10Hz)
+function netTick(dt) {
+  if (!NET.role) return; NET.acc += dt;
+  const live = G.phase === 'lobby' || G.phase === 'mission';
+  if (isHost()) {
+    if (NET.acc < (live ? 0.125 : 1)) return; NET.acc = 0; if (!NET.conns.size) return;
+    const a = []; if (live) for (const p of players) { if (!p.alive) continue; a.push(p.id, Math.round(p.x * 100), Math.round(p.z * 100), Math.round(p.y * 100), Math.round(p.yaw * 100), (p.moving ? 1 : 0) | (p.working ? 2 : 0)); }
+    const st = missionStats(); broadcast({ t: 's', p: a, g: Math.round(G.t * 10) / 10, d: st.done, n: st.total, z: G.paused ? 1 : 0 });
+  } else {
+    if (NET.acc < 0.1) return; NET.acc = 0; const me = U.me; if (!me || !me.alive || !live) return;
+    toHost({ t: 'pos', x: Math.round(me.x * 100) / 100, z: Math.round(me.z * 100) / 100, y: Math.round(me.y * 100) / 100, w: Math.round(me.yaw * 100) / 100, f: (me.moving ? 1 : 0) | (me.working ? 2 : 0) });
+  }
+}
+
+// ───────────── 방장 전용 게임 진행 ─────────────
+/* 본게임 시작: 이 시점의 규칙(CFG)으로 역할과 미션을 무작위 배정하고 각자에게 자기 역할만 알려 줌 */
+function beginMatch() {
+  if (!isHost() || G.phase !== 'lobby') return;
+  if (!players.length) { toast('아직 입장한 플레이어가 없습니다'); return; }
+  timers = [];
+  const total = players.length, zc = total >= 4 ? clamp(CFG.zombies | 0, 1, Math.floor((total - 1) / 2)) : 0;
+  const order = shuffle(players.map(p => p.id)), zset = new Set(order.slice(0, zc));
+  const tf = window.ArtRoomGame && window.ArtRoomGame.test.forceZombie, fp = tf && players.find(p => p.name === tf); // 테스트용 훅
+  if (fp && zc > 0 && !zset.has(fp.id)) { zset.delete(order[0]); zset.add(fp.id); }
+  players.forEach(p => { p.role = zset.has(p.id) ? 'zombie' : 'student'; p.missions = shuffle([...Array(MISSIONS.length).keys()]).slice(0, CFG.missionsPer);
+    p.done = p.missions.map(() => false); p.killCd = 0; p.emerg = 0; p.tpCd = 0; }); // 첫 공격 대기는 startRound 에서 적용
+  G.hasZombies = zc > 0; G.phase = 'mission';
+  const mates = players.filter(p => p.role === 'zombie').map(p => p.id), cfg = cfgData();
+  humans().forEach(p => sendTo(p.id, { t: 'begin', role: p.role, missions: p.missions, mates: p.role === 'zombie' ? mates : [], hz: G.hasZombies, cfg }));
+  $('hostStart').disabled = true; $('hostStart').classList.add('opacity-40'); refreshLobbyChat(); styleMarkers(); startRound();
+}
+function startRound() {
+  G.phase = 'mission'; G.t = CFG.missionTime; G.round++; G.cand = null; meetHide();
+  players.forEach(p => { p.corpse = null; if (p.alive) toSpawn(p); p.killCd = Math.max(p.killCd, Math.min(CFG.firstKillDelay, CFG.killCooldown)); });
+  AI.onRoundStart(); broadcast({ t: 'round', r: G.round, time: G.t }); toast(`미션 라운드 ${G.round} 시작!`);
+}
+function checkWin() {
+  if (!isHost() || G.phase === 'ended' || G.phase === 'menu' || G.phase === 'lobby') return true;
+  if (!players.length) return false;
+  const zs = players.filter(p => p.alive && p.role === 'zombie').length, ss = players.filter(p => p.alive && p.role === 'student').length, st = missionStats();
+  if (G.hasZombies && zs === 0) return endGame('student', '좀비를 모두 추방했습니다');
+  if (st.total > 0 && st.done >= st.total) return endGame('student', '살아 있는 학생 전원이 미션 3개를 모두 완료했습니다');
+  if (G.hasZombies && zs >= ss) return endGame('zombie', '좀비 수가 학생 수와 같아졌습니다');
+  if (!G.hasZombies && ss === 0) return endGame('zombie', '남은 플레이어가 없습니다');
+  return false;
+}
+function endGame(winner, reason) {
+  const z = players.filter(p => p.role === 'zombie').map(p => p.id);
+  broadcast({ t: 'end', w: winner, reason, hz: G.hasZombies, z }); showEnd(winner, reason, G.hasZombies, z); return true;
+}
+function kill(killer, victim) { // 방장 기기에서만 호출됨
+  if (!isHost() || !victim.alive || G.phase !== 'mission') return;
+  const cx = victim.x, cz = victim.z, cw = victim.yaw; markDead(victim, cx, cz, cw);
+  killer.killCd = CFG.killCooldown;
+  broadcast({ t: 'kill', v: victim.id, x: cx, z: cz, w: cw }); if (!killer.isBot) sendTo(killer.id, { t: 'kcd' });
+  AI.onKill(killer, victim); checkWin();
+}
+
+/* =====================================================================
+ * 7. 입력: 가상 조이스틱(우측 이동 / 좌측 시점) + 키보드/마우스
+ * ===================================================================== */
+const keys = {};
+const stickL = { el: $('stickL'), id: null, ox: 0, oy: 0, x: 0, y: 0 }, stickR = { el: $('stickR'), id: null, ox: 0, oy: 0, x: 0, y: 0 };
+let touchUI = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
+function placeSticks() {
+  if (stickL.id === null) { stickL.el.style.left = '90px'; stickL.el.style.top = (innerHeight - 100) + 'px'; }
+  if (stickR.id === null) { stickR.el.style.left = (innerWidth - 90) + 'px'; stickR.el.style.top = (innerHeight - 100) + 'px'; }
+}
+function applyTouchUI() {
+  stickL.el.classList.toggle('hidden', !touchUI); stickR.el.classList.toggle('hidden', !touchUI);
+  $('fabs').style.bottom = touchUI ? '190px' : '24px'; $('btnJump').style.bottom = touchUI ? '190px' : '24px';
+  document.querySelectorAll('.pc').forEach(e => e.style.display = touchUI ? 'none' : '');
+}
+function bindZone(zone, st) {
+  let mouseDrag = false, lx = 0, ly = 0; const knob = st.el.querySelector('.knob');
+  zone.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (e.pointerType === 'mouse') { mouseDrag = true; lx = e.clientX; ly = e.clientY; try { zone.setPointerCapture(e.pointerId); } catch (_) {} return; }
+    if (!touchUI) { touchUI = true; applyTouchUI(); }
+    if (st.id !== null) return;
+    st.id = e.pointerId; st.ox = e.clientX; st.oy = e.clientY; st.x = st.y = 0;
+    st.el.style.left = st.ox + 'px'; st.el.style.top = st.oy + 'px'; knob.style.transform = '';
+    try { zone.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  zone.addEventListener('pointermove', e => {
+    if (e.pointerType === 'mouse') { if (mouseDrag) { U.yaw -= (e.clientX - lx) * 0.006; U.pitch -= (e.clientY - ly) * 0.005; lx = e.clientX; ly = e.clientY; } return; }
+    if (e.pointerId !== st.id) return;
+    let dx = e.clientX - st.ox, dy = e.clientY - st.oy; const d = Math.hypot(dx, dy), R = 50;
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    st.x = dx / R; st.y = dy / R; knob.style.transform = `translate(${dx}px,${dy}px)`;
+  });
+  const up = e => {
+    if (e.pointerType === 'mouse') { mouseDrag = false; return; }
+    if (e.pointerId !== st.id) return;
+    st.id = null; st.x = st.y = 0; knob.style.transform = ''; placeSticks();
+  };
+  zone.addEventListener('pointerup', up); zone.addEventListener('pointercancel', up); zone.addEventListener('lostpointercapture', up);
+  zone.addEventListener('wheel', e => { U.dist = clamp(U.dist + Math.sign(e.deltaY) * 1.2, 5, 18); }, { passive: true });
+}
+bindZone($('zoneL'), stickL); bindZone($('zoneR'), stickR);
+addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (e.code === 'KeyE') doUse(); else if (e.code === 'KeyQ') doKill(); else if (e.code === 'KeyR') doReport(); else if (e.code === 'Space' && !e.repeat) doJump();
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+function fab(id, fn) { $(id).addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); fn(); }); }
+fab('btnUse', () => doUse()); fab('btnKill', () => doKill()); fab('btnAct', () => doReport()); fab('btnJump', () => doJump());
+
+function moveInput() {
+  let mx = stickR.x, my = -stickR.y;
+  if (keys.KeyW || keys.ArrowUp) my += 1; if (keys.KeyS || keys.ArrowDown) my -= 1;
+  if (keys.KeyD || keys.ArrowRight) mx += 1; if (keys.KeyA || keys.ArrowLeft) mx -= 1;
+  const l = Math.hypot(mx, my); if (l > 1) { mx /= l; my /= l; }
+  return [mx, my];
+}
+function updateLook(dt) {
+  U.yaw -= stickL.x * 2.6 * dt; U.pitch -= stickL.y * 1.7 * dt;
+  U.pitch = isFree() ? clamp(U.pitch, -1.45, 1.45) : clamp(U.pitch, -1.35, -0.25);
+}
+function updateUserAvatar(dt) { // 3인칭 아바타 이동 (미니게임 중에는 이동 불가)
+  const me = U.me; me.moving = false; me.working = miniOpen;
+  if (miniOpen) return;
+  const [mx, my] = moveInput(); if (!mx && !my) return;
+  const s = Math.sin(U.yaw), c = Math.cos(U.yaw), vx = s * my - c * mx, vz = c * my + s * mx, sp = CFG.playerSpeed * dt;
+  const nx = me.x + vx * sp, nz = me.z + vz * sp;
+  if (!blockedAt(nx, me.z, 0.4)) me.x = nx; if (!blockedAt(me.x, nz, 0.4)) me.z = nz;
+  let da = Math.atan2(vx, vz) - me.yaw; da = Math.atan2(Math.sin(da), Math.cos(da)); me.yaw += da * Math.min(1, dt * 14);
+  me.phase += dt * 12 * Math.hypot(mx, my); me.moving = true;
+}
+function updateFree(dt) { // 방장/유령: 1인칭 자유 비행 (벽 통과)
+  const ae = document.activeElement;
+  if (miniOpen || ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) return;
+  const [mx, my] = moveInput(), cp = Math.cos(U.pitch), s = Math.sin(U.yaw), c = Math.cos(U.yaw), sp = (keys.ControlLeft ? 26 : 13) * dt;
+  U.fp.x += (s * cp * my - c * mx) * sp; U.fp.z += (c * cp * my + s * mx) * sp; U.fp.y += Math.sin(U.pitch) * my * sp;
+  if (keys.Space) U.fp.y += sp; if (keys.ShiftLeft || keys.ShiftRight) U.fp.y -= sp;
+  U.fp.x = clamp(U.fp.x, MAP.x0 - 10, MAP.x1 + 10); U.fp.z = clamp(U.fp.z, MAP.z0 - 10, MAP.z1 + 10); U.fp.y = clamp(U.fp.y, 1.2, 45);
+}
+const _look = new THREE.Vector3();
+function updateCamera() {
+  const cp = Math.cos(U.pitch), dx = Math.sin(U.yaw) * cp, dy = Math.sin(U.pitch), dz = Math.cos(U.yaw) * cp;
+  if (isFree()) { camera.position.set(U.fp.x, U.fp.y, U.fp.z); camera.lookAt(_look.set(U.fp.x + dx, U.fp.y + dy, U.fp.z + dz)); return; }
+  const tx = U.me.x, ty = 1.7 + U.me.y * 0.6, tz = U.me.z; let d = U.dist;
+  for (let k = 1; k <= 14; k++) { // 벽에 가리면 카메라를 당김
+    const t = U.dist * k / 14, x = tx - dx * t, y = ty - dy * t, z = tz - dz * t; let hit = false;
+    for (let i = 0; i < colliders.length; i++) { const c = colliders[i]; if (y < c.h + 0.3 && x > c.x0 - 0.3 && x < c.x1 + 0.3 && z > c.z0 - 0.3 && z < c.z1 + 0.3) { hit = true; break; } }
+    if (hit) { d = Math.max(1.2, U.dist * (k - 1) / 14); break; }
+  }
+  camera.position.set(tx - dx * d, ty - dy * d, tz - dz * d); camera.lookAt(_look.set(tx, ty, tz));
+}
+
+/* =====================================================================
+ * 8. 상호작용 (미션 / 공격 / 시체 신고 / 비상 투표 / 점프 / 순간이동) — 참가자 기기
+ *    판정이 필요한 행동은 방장에게 요청만 보내고, 결과는 방장이 알려 줍니다.
+ * ===================================================================== */
+const act = { mission: -1, victim: null, corpse: null, emerg: false };
+function scanActions() {
+  act.mission = -1; act.victim = null; act.corpse = null; act.emerg = false;
+  if (U.mode === 'host' || U.ghost || !U.me || G.phase !== 'mission' || G.paused) return;
+  const me = U.me, px = me.x, pz = me.z; let bd = CFG.useRange;
+  MISSIONS.forEach((m, idx) => {
+    if (me.role === 'student') { const k = me.missions.indexOf(idx); if (k < 0 || me.done[k]) return; }
+    const d = Math.hypot(m.x - px, m.z - pz); if (d < bd) { bd = d; act.mission = idx; }
+  });
+  if (me.role === 'zombie') { let kd = CFG.killRange; players.forEach(p => { if (!p.alive || p.role === 'zombie') return; const d = Math.hypot(p.x - px, p.z - pz); if (d < kd && !sightBlocked(px, pz, p.x, p.z)) { kd = d; act.victim = p; } }); }
+  let cd = 3.2; players.forEach(p => { if (p.alive || !p.corpse) return; const d = Math.hypot(p.corpse.x - px, p.corpse.z - pz); if (d < cd && !sightBlocked(px, pz, p.corpse.x, p.corpse.z)) { cd = d; act.corpse = p; } });
+  act.emerg = !act.corpse && me.emerg < CFG.emergPer && Math.hypot(EMERG.x - px, EMERG.z - pz) < 3; // 시작 지점의 비상 투표 버튼
+}
+function doUse() {
+  if (miniOpen || act.mission < 0 || G.phase !== 'mission' || !U.me || U.ghost) return;
+  const idx = act.mission, m = MISSIONS[idx], fake = U.me.role === 'zombie';
+  openMini(m, fake, () => { if (fake) { toast('미션을 하는 척했습니다'); return; }
+    const k = U.me.missions.indexOf(idx); if (k < 0 || U.me.done[k]) return;
+    U.me.done[k] = true; toHost({ t: 'mdone', k }); styleMarkers(); toast(`'${m.name}' 완료! (${U.me.done.filter(Boolean).length}/${U.me.done.length})`); });
+}
+function doKill() { // 공격 요청 → 방장이 거리·쿨타임을 확인해 확정
+  if (miniOpen || !act.victim || !U.me || U.me.killCd > 0 || G.phase !== 'mission' || U.ghost) return;
+  toHost({ t: 'kill', v: act.victim.id }); U.me.killCd = 1.5; // 응답(kcd)이 오면 정식 쿨타임으로 바뀜
+}
+// 점프: 충돌 판정은 평면 기준 그대로라 장애물을 넘지는 못함
+const JUMP_V = 7.5, GRAVITY = 22;
+function jump(p) { if (p.alive && p.y <= 0) { p.vy = JUMP_V; p.y = 0.001; } }
+function doJump() { if (isFree() || miniOpen || G.paused || !U.me || (G.phase !== 'mission' && G.phase !== 'lobby')) return; jump(U.me); }
+function doReport() { // 상호작용 버튼: 시체 신고 또는 비상 투표
+  if (miniOpen || G.phase !== 'mission' || U.ghost || G.paused || !U.me) return;
+  if (act.corpse) { toHost({ t: 'report', c: act.corpse.id }); return; }
+  if (!act.emerg) return;
+  const wait = CFG.emergDelay - (CFG.missionTime - G.t);
+  if (wait > 0) { toast(`비상 투표는 ${Math.ceil(wait)}초 뒤부터 누를 수 있습니다`); return; }
+  U.me.emerg++; toHost({ t: 'emerg' });
+}
+// 좀비 전용: 미니맵에서 누른 곳과 가장 가까운 맵 구석으로 순간이동
+function safeSpot(x, z) { for (let r = 0; r <= 6; r += 0.5) for (let a = 0; a < 6.28; a += 0.4) { const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+  if (px > MAP.x0 + 1 && px < MAP.x1 - 1 && pz > MAP.z0 + 1 && pz < MAP.z1 - 1 && !blockedAt(px, pz, 0.6)) return [px, pz]; if (r === 0) break; } return [x, z]; }
+function teleportToCorner(p, mx, mz) {
+  if (!p.alive || p.role !== 'zombie' || p.tpCd > 0 || G.phase !== 'mission') return false;
+  let best = CORNERS[0], bd = 1e9; CORNERS.forEach(c => { const d = Math.hypot(c[0] - mx, c[1] - mz); if (d < bd) { bd = d; best = c; } });
+  const [x, z] = safeSpot(best[0], best[1]); p.x = x; p.z = z; p.y = 0; p.vy = 0; p.moving = false; p.tpCd = CFG.teleportCooldown; return true;
+}
+
+/* =====================================================================
+ * 9. 미니게임 모듈 (레지스트리 방식)
+ *   registerMiniGame(key, { desc, mount(root, api) → cleanup 함수 })
+ *   api.progress(0~1) : 상단 게이지,  api.complete() : 완료 처리
+ *   모든 입력은 Pointer Events 로 처리하므로 터치/마우스 공용입니다.
+ * ===================================================================== */
+const MiniGames = {};
+const registerMiniGame = (key, def) => { MiniGames[key] = def; };
+let miniOpen = false, miniCleanup = null;
+function openMini(mission, fake, onDone) {
+  const def = MiniGames[mission.game] || MiniGames.placeholder;
+  miniOpen = true; $('mini-modal').classList.remove('hidden');
+  $('mgTitle').textContent = mission.name + (fake ? ' (하는 척)' : ''); $('mgDesc').textContent = def.desc; $('mgBar').style.width = '0%';
+  const root = $('mgBody'); root.innerHTML = ''; let finished = false;
+  miniCleanup = def.mount(root, {
+    progress: v => { if (!finished) $('mgBar').style.width = (clamp(v, 0, 1) * 100).toFixed(0) + '%'; },
+    complete: () => { if (finished) return; finished = true; $('mgBar').style.width = '100%'; setTimeout(() => { if (miniOpen && root.isConnected) { closeMini(true); onDone(); } }, 450); },
+  }) || null;
+}
+function closeMini(silent) { if (!miniOpen) return; miniOpen = false; if (miniCleanup) { try { miniCleanup(); } catch (_) {} } miniCleanup = null; $('mgBody').innerHTML = ''; $('mini-modal').classList.add('hidden'); if (!silent) toast('미션을 중단했습니다'); }
+$('mgClose').addEventListener('click', () => closeMini(false));
+
+// ---- 공용 헬퍼 ----
+const STW = 264; // 스테이지 폭(px): 320px 폭 휴대폰에서도 잘리지 않는 크기
+function mgStage(root, h, bg, inner = '') { root.innerHTML = `<div class="mg-stage" style="width:${STW}px;height:${h}px;background:${bg}">${inner}</div><div class="mg-msg"></div>`; return root.firstElementChild; }
+const mgMsg = (root, t) => { const e = root.querySelector('.mg-msg'); if (e) e.textContent = t; };
+const moveTo = (el, x, y) => { el.style.left = x + 'px'; el.style.top = y + 'px'; };
+// 스테이지 안의 .mg-item 을 끌 수 있게 함. 놓으면 onDrop(el, 중심x, 중심y)
+function draggable(el, stageEl, onDrop) {
+  el.addEventListener('pointerdown', e => {
+    if (el.dataset.lock || el._drag) return; e.preventDefault(); e.stopPropagation();
+    const sx = e.clientX - el.offsetLeft, sy = e.clientY - el.offsetTop, id = e.pointerId;
+    el._drag = true; try { el.setPointerCapture(id); } catch (_) {} el.style.zIndex = 30; el.style.transition = 'none';
+    const mv = ev => { if (ev.pointerId !== id) return; moveTo(el, clamp(ev.clientX - sx, -8, stageEl.clientWidth - el.offsetWidth + 8), clamp(ev.clientY - sy, -8, stageEl.clientHeight - el.offsetHeight + 8)); };
+    const up = ev => { if (ev.pointerId !== id) return; el._drag = false; el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
+      el.style.zIndex = ''; el.style.transition = ''; onDrop(el, el.offsetLeft + el.offsetWidth / 2, el.offsetTop + el.offsetHeight / 2); };
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+}
+// destination-out 으로 덮개 레이어를 문질러 지우는 공용 게임 (먼지 털기 / 책상 닦기)
+function scrubGame(root, api, o) {
+  const S = 300;
+  root.innerHTML = `<div class="relative mx-auto" style="width:100%;max-width:${S}px;aspect-ratio:1"><canvas width="${S}" height="${S}" class="absolute inset-0 w-full h-full rounded-xl"></canvas><canvas width="${S}" height="${S}" class="absolute inset-0 w-full h-full rounded-xl" style="touch-action:none;cursor:crosshair"></canvas></div><div class="mg-msg">${o.label} 0%</div>`;
+  const cvs = root.querySelectorAll('canvas'), cv = cvs[1], d = cv.getContext('2d');
+  o.base(cvs[0].getContext('2d'), S); o.dirt(d, S);
+  d.globalCompositeOperation = 'destination-out'; d.lineCap = 'round'; d.lineJoin = 'round'; d.lineWidth = o.width;
+  let last = null, done = false, lastCheck = 0;
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * S / r.width, (e.clientY - r.top) * S / r.height]; };
+  const check = () => { const data = d.getImageData(0, 0, S, S).data; let clear = 0, tot = 0; for (let y = 2; y < S; y += 4) for (let x = 2; x < S; x += 4) { tot++; if (data[(y * S + x) * 4 + 3] < 40) clear++; }
+    const v = Math.min(1, (clear / tot) / o.thr); // 표본 픽셀의 thr 이상이 지워지면 100% 로 간주(모서리 잔여 픽셀 보정)
+    mgMsg(root, `${o.label} ${Math.floor(v * 100)}%`); api.progress(v); if (v >= 1 && !done) { done = true; d.clearRect(0, 0, S, S); api.complete(); } };
+  const rub = e => { const p = pos(e); d.beginPath(); d.moveTo(last[0], last[1]); d.lineTo(p[0], p[1]); d.stroke(); last = p; const now = performance.now(); if (now - lastCheck > 140) { lastCheck = now; check(); } };
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); last = pos(e); try { cv.setPointerCapture(e.pointerId); } catch (_) {} rub(e); });
+  cv.addEventListener('pointermove', e => { if (last && !done) rub(e); });
+  const up = () => { if (last) { last = null; if (!done) check(); } }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+}
+
+// (1) 팔레트 물감 짜기: 빈칸 5곳을 각각 10번씩 탭. 쉬면 물감이 조금씩 마름
+registerMiniGame('palette', {
+  desc: '팔레트 빈칸마다 10번씩 빠르게 탭해 물감을 가득 채우세요. 멈추면 물감이 말라 줄어듭니다.',
+  mount(root, api) {
+    const cols = ['#e53935', '#ff8a1f', '#ffd92e', '#2fa84f', '#2364e0', '#8a3ffc'], TAPS = 10, cnt = cols.map(() => 0);
+    root.innerHTML = `<div class="mx-auto p-4 pt-7 pb-6" style="max-width:${STW + 20}px;background:#e9dcc3;border-radius:46% 54% 44% 56%/52% 48% 52% 48%;box-shadow:inset 0 -6px 0 rgba(0,0,0,.12)"><div class="grid grid-cols-6 gap-1.5">${cols.map((c, i) => `<button class="well" data-i="${i}"><i style="background:radial-gradient(circle at 35% 30%,#fff6,transparent 40%),${c}"></i><b>0</b></button>`).join('')}</div></div><div class="mg-msg">각 칸 ${TAPS}번씩!</div>`;
+    const wells = [...root.querySelectorAll('.well')]; let lastTap = performance.now(), done = false;
+    const draw = () => { wells.forEach((w, i) => { w.firstChild.style.transform = `scale(${cnt[i] / TAPS})`; w.lastChild.textContent = cnt[i] >= TAPS ? '✔' : cnt[i]; }); api.progress(cnt.reduce((a, b) => a + b, 0) / (TAPS * cols.length)); };
+    const h = e => { const b = e.target.closest('.well'); if (!b || done) return; e.preventDefault(); const i = +b.dataset.i; if (cnt[i] >= TAPS) return; cnt[i]++; lastTap = performance.now(); draw(); if (cnt.every(c => c >= TAPS)) { done = true; api.complete(); } };
+    root.addEventListener('pointerdown', h);
+    const iv = setInterval(() => { if (done || performance.now() - lastTap < 600) return; let ch = false; cnt.forEach((c, i) => { if (c > 0 && c < TAPS) { cnt[i]--; ch = true; } }); if (ch) draw(); }, 350);
+    return () => { clearInterval(iv); root.removeEventListener('pointerdown', h); };
+  }
+});
+// (2) 붓 세척하기: 좌우 드래그 Delta X 누적. 멈추면 얼룩이 다시 번짐
+registerMiniGame('brush', {
+  desc: '붓을 좌우로 빠르게 흔들어 물감 얼룩을 씻어내세요. 멈추면 얼룩이 다시 번집니다.',
+  mount(root, api) {
+    const basin = mgStage(root, 190, 'linear-gradient(#cfeefa,#62b6d8)', `<div class="murk absolute inset-0" style="background:#7a3fa0;opacity:0"></div>
+      <div class="br absolute" style="left:50%;top:14px;width:40px;margin-left:-20px;pointer-events:none">
+        <div style="width:12px;height:84px;margin:0 auto;background:#8a5a2b;border-radius:6px 6px 0 0"></div>
+        <div style="width:22px;height:16px;margin:0 auto;background:#b9c0c7"></div>
+        <div class="relative" style="width:30px;height:50px;margin:0 auto;background:#ecdcae;border-radius:4px 4px 50% 50%;overflow:hidden"><div class="stain absolute inset-0" style="background:linear-gradient(#7a3fa0,#e53935)"></div></div>
+      </div>`);
+    basin.style.cursor = 'grab'; mgMsg(root, '← 좌우로 문지르기 →');
+    const br = basin.querySelector('.br'), stain = basin.querySelector('.stain'), murk = basin.querySelector('.murk');
+    const NEED = 4800, DECAY = 520; let acc = 0, lx = null, done = false, lastMove = 0, lt = performance.now(), raf = 0;
+    const draw = () => { const v = Math.min(1, acc / NEED); stain.style.opacity = 1 - v; murk.style.opacity = v * 0.35; api.progress(v); };
+    basin.addEventListener('pointerdown', e => { e.preventDefault(); lx = e.clientX; try { basin.setPointerCapture(e.pointerId); } catch (_) {} });
+    basin.addEventListener('pointermove', e => { if (lx === null || done) return; acc += Math.abs(e.clientX - lx); lx = e.clientX; lastMove = performance.now();
+      const r = basin.getBoundingClientRect(); br.style.left = clamp(e.clientX - r.left, 20, r.width - 20) + 'px'; draw(); if (acc >= NEED) { done = true; api.complete(); } });
+    const up = () => { lx = null; }; basin.addEventListener('pointerup', up); basin.addEventListener('pointercancel', up);
+    const loop = t => { const dt = (t - lt) / 1000; lt = t; if (!done && acc > 0 && t - lastMove > 250) { acc = Math.max(0, acc - DECAY * dt); draw(); } raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
+  }
+});
+// (3) 조각상 먼지 털기
+registerMiniGame('dust', {
+  desc: '석고상 위의 먼지를 문질러 100% 닦아내세요.',
+  mount(root, api) {
+    scrubGame(root, api, { label: '먼지 제거', width: 27, thr: 0.985,
+      base(a, S) {
+        let g = a.createLinearGradient(0, 0, 0, S); g.addColorStop(0, '#39445c'); g.addColorStop(1, '#1f2636'); a.fillStyle = g; a.fillRect(0, 0, S, S);
+        a.fillStyle = '#8f8f8a'; a.fillRect(85, 250, 130, 34); a.fillStyle = '#b5b5ae'; a.fillRect(95, 236, 110, 16);
+        g = a.createLinearGradient(60, 0, 240, 0); g.addColorStop(0, '#fbfbf6'); g.addColorStop(1, '#bdbdb4'); a.fillStyle = g;
+        a.beginPath(); a.moveTo(70, 238); a.quadraticCurveTo(70, 180, 125, 172); a.lineTo(175, 172); a.quadraticCurveTo(230, 180, 230, 238); a.closePath(); a.fill();
+        a.fillRect(132, 140, 36, 40); a.beginPath(); a.ellipse(150, 95, 46, 58, 0, 0, 7); a.fill();
+        a.fillStyle = '#d9d9d0'; a.beginPath(); a.ellipse(150, 52, 44, 26, 0, Math.PI, 0); a.fill();
+        a.fillStyle = '#a9a9a0'; a.beginPath(); a.ellipse(133, 92, 6, 3, 0, 0, 7); a.ellipse(167, 92, 6, 3, 0, 0, 7); a.fill();
+        a.beginPath(); a.moveTo(150, 96); a.lineTo(143, 116); a.lineTo(154, 116); a.closePath(); a.fill(); a.fillRect(138, 128, 24, 3);
+      },
+      dirt(d, S) { d.fillStyle = 'rgba(126,112,92,0.97)'; d.fillRect(0, 0, S, S);
+        for (let i = 0; i < 900; i++) { d.fillStyle = `rgba(${90 + Math.random() * 70 | 0},${80 + Math.random() * 60 | 0},${60 + Math.random() * 50 | 0},.5)`; d.beginPath(); d.arc(Math.random() * S, Math.random() * S, 1 + Math.random() * 5, 0, 7); d.fill(); } },
+    });
+  }
+});
+// (4) 색상환 맞추기: 원색 2개를 팔레트로 끌어 섞어 지정된 순서대로 2차색 3가지를 만든다
+registerMiniGame('colormix', {
+  desc: '원색 물감 2개를 가운데 팔레트로 끌어 섞어, 아래에 표시된 순서대로 세 가지 색을 만드세요.',
+  mount(root, api) {
+    const SRC = { R: ['빨강', '#e53935'], Y: ['노랑', '#ffd92e'], B: ['파랑', '#2364e0'] };
+    const MIX = { RY: ['주황', '#ff8a1f'], BY: ['초록', '#2fa84f'], BR: ['보라', '#8a3ffc'] };
+    const order = shuffle(Object.keys(MIX)), home = { R: [24, 12], Y: [106, 12], B: [188, 12] };
+    const st = mgStage(root, 300, '#2b3246', `<div class="pal absolute" style="left:72px;top:96px;width:120px;height:120px;border-radius:50%;background:#e9dcc3;box-shadow:inset 0 4px 10px rgba(0,0,0,.35);overflow:hidden;display:flex"></div>
+      <div class="absolute" style="left:0;right:0;top:236px;display:flex;justify-content:center;gap:8px">${order.map((k, i) => `<div class="tg" data-k="${k}" style="width:74px;padding:6px 0;border-radius:10px;text-align:center;font-size:12px;font-weight:700;background:${MIX[k][1]};color:#111;opacity:.45;border:3px solid transparent">${i + 1}. ${MIX[k][0]}</div>`).join('')}</div>`
+      + Object.keys(SRC).map(k => `<div class="mg-item" data-k="${k}" style="left:${home[k][0]}px;top:${home[k][1]}px;width:52px;height:52px;border-radius:50%;background:${SRC[k][1]};border:3px solid #fff8;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#111">${SRC[k][0]}</div>`).join(''));
+    const pal = st.querySelector('.pal'), tgs = [...st.querySelectorAll('.tg')]; let slots = [], cur = 0, busy = false, live = true;
+    const mark = () => tgs.forEach((t, i) => { t.style.opacity = i < cur ? 1 : i === cur ? 0.95 : 0.4; t.style.borderColor = i === cur ? '#fff' : 'transparent'; if (i < cur && !t.dataset.ok) { t.dataset.ok = 1; t.textContent = '✔ ' + MIX[t.dataset.k][0]; } });
+    const paint = () => { pal.innerHTML = slots.map(k => `<div style="flex:1;background:${SRC[k][1]}"></div>`).join(''); };
+    mark(); mgMsg(root, `먼저 ${MIX[order[0]][0]}을(를) 만드세요`);
+    st.querySelectorAll('.mg-item').forEach(el => draggable(el, st, (el, x, y) => {
+      const k = el.dataset.k; moveTo(el, home[k][0], home[k][1]);
+      if (busy || Math.hypot(x - 132, y - 156) > 72) return;
+      slots.push(k); paint(); if (slots.length < 2) return;
+      busy = true; const key = slots.slice().sort().join(''), res = MIX[key];
+      if (!res) mgMsg(root, '같은 색끼리는 새로운 색이 되지 않아요');
+      else { pal.innerHTML = `<div style="flex:1;background:${res[1]}"></div>`;
+        if (key === order[cur]) { cur++; mark(); api.progress(cur / 3); mgMsg(root, cur < 3 ? `${res[0]} 완성! 다음은 ${MIX[order[cur]][0]}` : '모두 완성!'); if (cur >= 3) api.complete(); }
+        else mgMsg(root, `${res[0]}이(가) 됐어요. 지금은 ${MIX[order[cur]][0]} 차례!`); }
+      setTimeout(() => { if (!live) return; slots = []; paint(); busy = false;
+        const hs = shuffle(Object.values(home)); // 섞을 때마다 물감 위치가 바뀜
+        st.querySelectorAll('.mg-item').forEach((it, i) => { home[it.dataset.k] = hs[i]; if (!it._drag) moveTo(it, hs[i][0], hs[i][1]); }); }, 650);
+    }));
+    return () => { live = false; };
+  }
+});
+// (5) 쓰레기 분리수거: 8개의 쓰레기를 알맞은 함으로 드래그
+registerMiniGame('recycle', {
+  desc: '바닥에 흩어진 쓰레기 8개를 알맞은 분리수거함으로 끌어다 넣으세요.',
+  mount(root, api) {
+    const BINS = shuffle([['paper', '종이함', '#2a6f97'], ['general', '일반쓰레기', '#5b616b'], ['plastic', '플라스틱함', '#2f8f5b']]); // 함 위치는 매번 바뀜
+    const TRASH = [['📄', '종이 쪼가리', 'paper'], ['📰', '신문지', 'paper'], ['🗒️', '구겨진 도화지', 'paper'], ['✏️', '몽당연필', 'general'], ['🧻', '물감 묻은 휴지', 'general'], ['🧽', '낡은 스펀지', 'general'], ['🧴', '플라스틱 물통', 'plastic'], ['🥤', '플라스틱 컵', 'plastic']];
+    const st = mgStage(root, 336, 'repeating-linear-gradient(90deg,#8d7b66 0 43px,#857460 43px 44px)',
+      BINS.map((b, i) => `<div class="absolute bin" data-b="${b[0]}" style="left:${4 + i * 87}px;top:244px;width:82px;height:88px;border-radius:8px 8px 12px 12px;box-sizing:border-box;background:${b[2]};border-top:8px solid #0004;display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;font-size:12px;font-weight:800">${b[1]}</div>`).join('')
+      + shuffle(TRASH.slice()).map(t => `<div class="mg-item" data-b="${t[2]}" style="left:${(rand(4, 204)) | 0}px;top:${(rand(6, 170)) | 0}px;width:56px;height:56px;border-radius:10px;background:#f4efe2;box-shadow:0 2px 5px #0006;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#222"><span style="font-size:24px;line-height:1">${t[0]}</span><span style="font-size:8.5px;font-weight:700;margin-top:2px;white-space:nowrap">${t[1]}</span></div>`).join(''));
+    let n = 0; mgMsg(root, '0 / 8');
+    st.querySelectorAll('.mg-item').forEach(el => draggable(el, st, (el, x, y) => {
+      if (y < 240) return; const bi = clamp(Math.floor((x - 4) / 87), 0, 2), bin = BINS[bi];
+      if (bin[0] === el.dataset.b) { el.dataset.lock = 1; moveTo(el, 4 + bi * 87 + 13, 262); el.style.transform = 'scale(.3)'; el.style.opacity = 0; n++; api.progress(n / 8); mgMsg(root, `${n} / 8`); if (n >= 8) api.complete(); }
+      else { moveTo(el, (rand(4, 204)) | 0, (rand(6, 170)) | 0); mgMsg(root, `거긴 ${bin[1]}이에요! 다시 분류하세요 (${n} / 8)`); }
+    }));
+  }
+});
+// (6) 이젤 나사 조이기: atan2 누적 각도 1080° (시계 방향). 손을 떼면 조금씩 풀림
+registerMiniGame('screw', {
+  desc: '나사 주위로 시계 방향 원을 그려 3바퀴(1080°) 조이세요. 손을 떼면 나사가 조금씩 풀립니다.',
+  mount(root, api) {
+    const st = mgStage(root, 264, 'repeating-linear-gradient(0deg,#a9793f 0 22px,#9b6b3d 22px 24px)', `<div class="absolute" style="left:32px;top:32px;width:200px;height:200px;border-radius:50%;border:3px dashed #fff5"></div>
+      <div class="scr absolute" style="left:57px;top:57px;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#f1f3f5,#8a8f98 70%);box-shadow:0 6px 14px #0008;pointer-events:none">
+        <div class="absolute" style="left:14px;right:14px;top:66px;height:18px;border-radius:6px;background:#3b4252"></div><div class="absolute" style="top:14px;bottom:14px;left:66px;width:18px;border-radius:6px;background:#3b4252"></div>
+        <div class="absolute" style="left:69px;top:4px;width:12px;height:12px;border-radius:50%;background:#e53935"></div></div>`);
+    st.style.cursor = 'grab';
+    const scr = st.querySelector('.scr'), GOAL = Math.PI * 6; let acc = 0, la = null, held = false, done = false, lt = performance.now(), raf = 0;
+    const ang = e => { const r = st.getBoundingClientRect(), dx = e.clientX - r.left - 132, dy = e.clientY - r.top - 132; return Math.hypot(dx, dy) < 22 ? null : Math.atan2(dy, dx); };
+    const draw = () => { scr.style.transform = `rotate(${acc}rad)`; api.progress(acc / GOAL); mgMsg(root, `${Math.floor(acc * 180 / Math.PI)}° / 1080°  (${(acc / (Math.PI * 2)).toFixed(1)}바퀴)`); };
+    st.addEventListener('pointerdown', e => { e.preventDefault(); held = true; la = ang(e); try { st.setPointerCapture(e.pointerId); } catch (_) {} });
+    st.addEventListener('pointermove', e => { if (!held || done) return; const a = ang(e); if (a === null) { la = null; return; }
+      if (la !== null) { let d = a - la; d = Math.atan2(Math.sin(d), Math.cos(d)); acc = Math.max(0, acc + d); draw(); if (acc >= GOAL) { done = true; acc = GOAL; draw(); api.complete(); } } la = a; });
+    const up = () => { held = false; la = null; }; st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
+    const loop = t => { const dt = (t - lt) / 1000; lt = t; if (!held && !done && acc > 0) { acc = Math.max(0, acc - 1.0 * dt); draw(); } raf = requestAnimationFrame(loop); };
+    draw(); raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
+  }
+});
+// (7) 찢어진 명화 복원하기: 3x3 = 9조각 퍼즐
+registerMiniGame('puzzle', {
+  desc: '찢어진 그림 9조각을 3×3 액자의 제자리에 끌어다 맞추세요. 틀린 칸에 놓으면 튕겨 나옵니다.',
+  mount(root, api) {
+    const S = 198, C = 66, GX = 33, GY = 8, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    // '별이 빛나는 밤' 풍의 그림
+    let gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, '#0b1d51'); gr.addColorStop(0.7, '#1d4e9e'); gr.addColorStop(1, '#3a6fb5'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.lineCap = 'round'; const sw = (x, y, r, c, w) => { g.strokeStyle = c; g.lineWidth = w; for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(x, y, r + k * 7, k * 0.9, k * 0.9 + 4.4); g.stroke(); } };
+    sw(96, 70, 14, '#8ec5ff', 4); sw(140, 96, 10, '#bfe0ff', 3); sw(60, 100, 8, '#6fa8ef', 3);
+    for (let i = 0; i < 40; i++) { g.strokeStyle = ['#8ec5ff', '#27408b', '#cfe8ff'][i % 3]; g.lineWidth = 2; const x = (i * 53) % S, y = (i * 31) % 130; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 10, y + ((i % 5) - 2)); g.stroke(); }
+    [[26, 24, 7], [70, 20, 5], [118, 30, 6], [150, 16, 4], [40, 62, 4], [176, 60, 5], [100, 14, 3]].forEach(([x, y, r]) => { g.fillStyle = '#ffe46b55'; g.beginPath(); g.arc(x, y, r * 2.2, 0, 7); g.fill(); g.fillStyle = '#ffe46b'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); });
+    g.fillStyle = '#ffd92e55'; g.beginPath(); g.arc(168, 30, 24, 0, 7); g.fill(); g.fillStyle = '#ffd92e'; g.beginPath(); g.arc(168, 30, 14, 0, 7); g.fill(); g.fillStyle = '#1b3f8a'; g.beginPath(); g.arc(162, 27, 11, 0, 7); g.fill();
+    g.fillStyle = '#16335f'; g.beginPath(); g.moveTo(0, 160); g.quadraticCurveTo(50, 120, 100, 150); g.quadraticCurveTo(150, 128, S, 150); g.lineTo(S, S); g.lineTo(0, S); g.fill();
+    g.fillStyle = '#0b1a33'; [[70, 160, 14, 18], [92, 164, 12, 14], [112, 158, 16, 20], [140, 166, 12, 12], [160, 160, 14, 18]].forEach(([x, y, w, h]) => { g.fillRect(x, y, w, h); g.beginPath(); g.moveTo(x - 2, y); g.lineTo(x + w / 2, y - 8); g.lineTo(x + w + 2, y); g.fill(); });
+    g.fillStyle = '#ffd92e'; [[75, 166], [117, 166], [164, 168], [96, 170]].forEach(([x, y]) => g.fillRect(x, y, 4, 5)); g.fillStyle = '#0b1a33'; g.fillRect(122, 136, 4, 24); g.beginPath(); g.moveTo(118, 138); g.lineTo(124, 118); g.lineTo(130, 138); g.fill();
+    g.fillStyle = '#07140d'; g.beginPath(); g.moveTo(14, S); g.quadraticCurveTo(8, 120, 30, 50); g.quadraticCurveTo(34, 110, 52, S); g.fill(); g.beginPath(); g.moveTo(30, S); g.quadraticCurveTo(36, 140, 46, 96); g.quadraticCurveTo(50, 150, 62, S); g.fill();
+    const url = cv.toDataURL();
+    let h = `<div class="absolute" style="left:${GX - 4}px;top:${GY - 4}px;width:${S + 8}px;height:${S + 8}px;border:4px solid #c9a227;border-radius:4px;background:#1a1f2e"></div><div class="absolute" style="left:${GX}px;top:${GY}px;width:${S}px;height:${S}px;background:url(${url});opacity:.06"></div>`;
+    for (let i = 0; i < 9; i++) h += `<div class="absolute" style="left:${GX + (i % 3) * C}px;top:${GY + ((i / 3) | 0) * C}px;width:${C}px;height:${C}px;border:1px dashed #fff4;box-sizing:border-box"></div>`;
+    shuffle([...Array(9).keys()]).forEach(i => { h += `<div class="mg-item" data-i="${i}" style="left:${(rand(2, STW - C - 2)) | 0}px;top:${(rand(216, 280)) | 0}px;width:${C}px;height:${C}px;background:url(${url}) -${(i % 3) * C}px -${((i / 3) | 0) * C}px;box-shadow:0 2px 6px #000a;outline:1px solid #fff6;transform:rotate(${(rand(-9, 9)) | 0}deg)"></div>`; });
+    const st = mgStage(root, 350, '#2b3246', h); let n = 0; mgMsg(root, '0 / 9 조각');
+    const slotC = i => [GX + (i % 3) * C + C / 2, GY + ((i / 3) | 0) * C + C / 2];
+    st.querySelectorAll('.mg-item').forEach(el => draggable(el, st, (el, x, y) => {
+      let near = -1; for (let i = 0; i < 9; i++) { const [sx, sy] = slotC(i); if (Math.hypot(x - sx, y - sy) < 20) near = i; }
+      if (near < 0) return;
+      if (near === +el.dataset.i) { const [sx, sy] = slotC(near); el.dataset.lock = 1; el.style.transform = ''; el.style.boxShadow = 'none'; el.style.zIndex = 1; moveTo(el, sx - C / 2, sy - C / 2); n++; api.progress(n / 9); mgMsg(root, `${n} / 9 조각`); if (n >= 9) api.complete(); }
+      else { moveTo(el, (rand(2, STW - C - 2)) | 0, (rand(216, 280)) | 0); mgMsg(root, `그 자리가 아니에요 (${n} / 9 조각)`); }
+    }));
+  }
+});
+// (8) 가위질 선 따라 자르기: 포인터를 떼지 않고 경로 허용 범위 안에서 끝까지
+registerMiniGame('cut', {
+  desc: '초록 시작점에서 빨간 끝점까지, 손을 떼지 말고 점선을 벗어나지 않게 따라 자르세요.',
+  mount(root, api) {
+    const W = STW, H = 300, TOL = 13;
+    root.innerHTML = `<canvas width="${W}" height="${H}" class="block mx-auto rounded-xl" style="width:${W}px;height:${H}px;touch-action:none;cursor:crosshair"></canvas><div class="mg-msg">초록 점을 누른 채로 출발!</div>`;
+    const cv = root.firstElementChild, g = cv.getContext('2d');
+    // 경로: 앞 절반은 곡선(사인), 뒤 절반은 지그재그 → 약 2px 간격으로 재표본화
+    const raw = []; for (let i = 0; i <= 400; i++) { const u = i / 400, y = 34 + 232 * u; let x;
+      if (u <= 0.55) x = 132 + 86 * Math.sin(u * Math.PI * 3); else { const v = ((u - 0.55) / 0.15) % 1; x = 132 + 86 * Math.sin(0.55 * Math.PI * 3) + 150 * (v < 0.5 ? v * 2 : 2 - v * 2); } raw.push([x, y]); }
+    const pts = [raw[0]]; let carry = 0; for (let i = 1; i < raw.length; i++) { const a = raw[i - 1], b = raw[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]); let t = 2 - carry; while (t <= d) { pts.push([a[0] + (b[0] - a[0]) * t / d, a[1] + (b[1] - a[1]) * t / d]); t += 2; } carry = d - (t - 2); }
+    const n = pts.length, A = pts[0], B = pts[n - 1]; let idx = 0, cutting = false, done = false, pid = null, cur = null;
+    const line = (a, b) => { g.beginPath(); g.moveTo(pts[a][0], pts[a][1]); for (let i = a + 1; i <= b; i++) g.lineTo(pts[i][0], pts[i][1]); g.stroke(); };
+    const draw = () => { g.fillStyle = '#f7d774'; g.fillRect(0, 0, W, H); g.fillStyle = '#f2c94c'; for (let i = 0; i < 12; i++) g.fillRect(0, i * 26, W, 2);
+      g.lineJoin = g.lineCap = 'round'; g.setLineDash([7, 6]); g.strokeStyle = '#4a4a4a'; g.lineWidth = 3; line(0, n - 1); g.setLineDash([]);
+      if (idx > 0) { g.strokeStyle = '#2b3246'; g.lineWidth = 7; line(0, idx); g.strokeStyle = '#fff'; g.lineWidth = 2; line(0, idx); }
+      g.fillStyle = '#2fa84f'; g.beginPath(); g.arc(A[0], A[1], 11, 0, 7); g.fill(); g.fillStyle = '#e53935'; g.beginPath(); g.arc(B[0], B[1], 11, 0, 7); g.fill();
+      g.fillStyle = '#fff'; g.font = 'bold 10px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('시작', A[0], A[1]); g.fillText('끝', B[0], B[1]);
+      if (cutting && cur) { g.strokeStyle = '#e53935'; g.lineWidth = 3; g.beginPath(); g.arc(cur[0], cur[1], 9, 0, 7); g.stroke(); } };
+    const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
+    const fail = m => { cutting = false; pid = null; idx = 0; cur = null; api.progress(0); mgMsg(root, m); draw(); };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (done) return; const p = pos(e); if (Math.hypot(p[0] - A[0], p[1] - A[1]) > 20) { mgMsg(root, '초록 시작점에서 출발해야 해요'); return; }
+      cutting = true; pid = e.pointerId; idx = 0; cur = p; try { cv.setPointerCapture(pid); } catch (_) {} mgMsg(root, '손을 떼지 말고 끝까지!'); draw(); });
+    cv.addEventListener('pointermove', e => { if (!cutting || e.pointerId !== pid) return; const p = pos(e); cur = p; let best = idx, bd = 1e9;
+      for (let i = Math.max(0, idx - 8); i <= Math.min(n - 1, idx + 40); i++) { const d = Math.hypot(pts[i][0] - p[0], pts[i][1] - p[1]); if (d < bd) { bd = d; best = i; } }
+      if (bd > TOL) { fail('선을 벗어났어요! 처음부터 다시'); return; }
+      if (best > idx) idx = best; api.progress(idx / (n - 1)); draw();
+      if (idx >= n - 3) { done = true; cutting = false; mgMsg(root, '깔끔하게 잘랐어요!'); api.complete(); } });
+    const up = e => { if (cutting && e.pointerId === pid) fail('손을 뗐어요! 처음부터 다시'); }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    draw();
+  }
+});
+// (9) 미술 도구 제자리 정리: 실루엣 근처로 가져가면 자석처럼 스냅
+registerMiniGame('tools', {
+  desc: '도구함의 그림자에 맞는 도구를 끌어다 놓으세요. 가까이 가면 자석처럼 붙습니다. (자리가 없는 도구도 섞여 있어요)',
+  mount(root, api) {
+    const svg = b => `<svg viewBox="0 0 60 60" width="60" height="60" style="display:block;pointer-events:none">${b}</svg>`;
+    const TOOLS = {
+      scissors: ['가위', '<path d="M16 5L34 38M44 5L26 38" stroke="#b0b8c0" stroke-width="6" stroke-linecap="round"/><circle cx="20" cy="46" r="8" fill="none" stroke="#e53935" stroke-width="5"/><circle cx="40" cy="46" r="8" fill="none" stroke="#e53935" stroke-width="5"/>'],
+      glue: ['딱풀', '<rect x="20" y="18" width="20" height="38" rx="4" fill="#ffd92e"/><rect x="17" y="5" width="26" height="15" rx="3" fill="#e53935"/>'],
+      ruler: ['자', '<rect x="3" y="21" width="54" height="18" rx="2" fill="#f2cc8f" stroke="#a67c3a" stroke-width="2"/><path d="M10 21v8M18 21v5M26 21v8M34 21v5M42 21v8M50 21v5" stroke="#7a5a2a" stroke-width="2"/>'],
+      eraser: ['지우개', '<path d="M8 44L24 14H52L36 44Z" fill="#ff9ac4"/><path d="M8 44L16 29H44L36 44Z" fill="#6ec6ff"/>'],
+      pencil: ['연필', '<path d="M10 50L16 34L42 8L52 18L26 44Z" fill="#ffb300"/><path d="M10 50L16 34L26 44Z" fill="#3b2f2f"/>'],
+      knife: ['커터칼', '<rect x="24" y="24" width="12" height="32" rx="3" fill="#2fa84f"/><path d="M26 24V6l8 9v9z" fill="#cfd8dc"/>'],
+      brush: ['붓', '<rect x="27" y="4" width="6" height="32" rx="2" fill="#8a5a2b"/><path d="M23 36h14l-3 20h-8z" fill="#2364e0"/>'],
+    };
+    const real = shuffle(['scissors', 'glue', 'ruler', 'eraser']), slot = i => [6 + i * 64, 24];
+    let h = `<div class="absolute" style="left:0;top:0;width:100%;height:108px;background:#6b4f35;border-bottom:6px solid #4a3828"></div><div class="absolute" style="left:8px;top:4px;font-size:11px;font-weight:700;color:#e9dcc3">도구함</div>`;
+    real.forEach((k, i) => { const [x, y] = slot(i); h += `<div class="absolute" style="left:${x}px;top:${y}px;width:60px;height:60px;filter:brightness(0);opacity:.45">${svg(TOOLS[k][1])}</div>`; });
+    shuffle(Object.keys(TOOLS)).forEach(k => { h += `<div class="mg-item" data-k="${k}" style="left:${(rand(4, 200)) | 0}px;top:${(rand(130, 250)) | 0}px;width:60px;height:60px;transform:rotate(${(rand(-25, 25)) | 0}deg);filter:drop-shadow(0 2px 3px #0008)">${svg(TOOLS[k][1])}</div>`; });
+    const st = mgStage(root, 320, '#c8a66f', h); let n = 0; mgMsg(root, '0 / 4');
+    st.querySelectorAll('.mg-item').forEach(el => draggable(el, st, (el, x, y) => {
+      let near = -1; real.forEach((k, i) => { const [sx, sy] = slot(i); if (Math.hypot(x - sx - 30, y - sy - 30) < 26) near = i; });
+      if (near < 0) return;
+      if (real[near] === el.dataset.k) { const [sx, sy] = slot(near); el.dataset.lock = 1; el.style.transform = ''; moveTo(el, sx, sy); n++; api.progress(n / 4); mgMsg(root, `${TOOLS[el.dataset.k][0]} 정리 완료 (${n} / 4)`); if (n >= 4) api.complete(); }
+      else { moveTo(el, (rand(4, 200)) | 0, (rand(130, 250)) | 0); mgMsg(root, `${TOOLS[el.dataset.k][0]}의 자리가 아니에요 (${n} / 4)`); }
+    }));
+  }
+});
+// (10) 책상 닦기
+registerMiniGame('wipe', {
+  desc: '책상 위의 검은 때를 문질러 100% 닦아내세요.',
+  mount(root, api) {
+    scrubGame(root, api, { label: '닦은 면적', width: 30, thr: 0.985,
+      base(a, S) { a.fillStyle = '#c8a66f'; a.fillRect(0, 0, S, S); a.strokeStyle = '#b08d57'; a.lineWidth = 2; for (let y = 12; y < S; y += 22) { a.beginPath(); a.moveTo(0, y); a.bezierCurveTo(80, y - 6, 200, y + 8, S, y - 2); a.stroke(); }
+        a.fillStyle = '#f4efe2'; a.save(); a.translate(190, 80); a.rotate(0.2); a.fillRect(-45, -60, 90, 120); a.restore(); a.fillStyle = '#e53935'; a.beginPath(); a.arc(80, 210, 20, 0, 7); a.fill(); a.fillStyle = '#2364e0'; a.beginPath(); a.arc(120, 226, 14, 0, 7); a.fill();
+        a.fillStyle = '#ffb300'; a.save(); a.translate(70, 90); a.rotate(-0.6); a.fillRect(-50, -5, 100, 10); a.restore(); },
+      dirt(d, S) { d.fillStyle = 'rgba(16,14,14,0.96)'; d.fillRect(0, 0, S, S);
+        for (let i = 0; i < 500; i++) { d.fillStyle = `rgba(${40 + Math.random() * 40 | 0},${30 + Math.random() * 30 | 0},${25 + Math.random() * 25 | 0},.6)`; d.beginPath(); d.arc(Math.random() * S, Math.random() * S, 2 + Math.random() * 8, 0, 7); d.fill(); } },
+    });
+  }
+});
+// 등록되지 않은 game 키에 대한 안전 장치
+registerMiniGame('placeholder', {
+  desc: '버튼을 길게 눌러 진행하세요.',
+  mount(root, api) {
+    root.innerHTML = `<button class="w-full rounded-xl bg-slate-600 active:bg-amber-500 font-bold py-8 text-lg" style="touch-action:none">꾹 누르고 있기</button>`;
+    const b = root.firstElementChild; let v = 0, on = false, raf = 0, lt = performance.now();
+    const loop = t => { const dt = (t - lt) / 1000; lt = t; v = clamp(v + (on ? dt / 2.5 : -dt / 2), 0, 1); api.progress(v); if (v >= 1) { api.complete(); return; } raf = requestAnimationFrame(loop); };
+    b.addEventListener('pointerdown', e => { e.preventDefault(); on = true; }); const off = () => { on = false; }; b.addEventListener('pointerup', off); b.addEventListener('pointerleave', off); b.addEventListener('pointercancel', off);
+    raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
+  }
+});
+
+/* =====================================================================
+ * 10. 회의: 1차 지목 투표 → 최후 변론(채팅) → 2차 찬반 투표
+ *     ui*  : 화면 표시(방장·참가자 공용)   /   start*·finish* : 방장 기기에서만 실행되는 진행 로직
+ * ===================================================================== */
+const meetShow = html => { $('meetBody').innerHTML = html; $('meet').classList.remove('hidden'); };
+const meetHide = () => $('meet').classList.add('hidden');
+const tmr = () => `<span id="meetT" class="tabular-nums font-extrabold text-amber-300"></span>`;
+const freezeAll = () => players.forEach(p => { p.moving = false; p.working = false; p.y = p.ty = 0; p.vy = 0; });
+const WHY_NOT = () => U.mode === 'host' ? '방장은 투표하지 않습니다.' : '사망자는 투표할 수 없습니다.';
+function uiVote1(reason) {
+  const al = aliveList(), can = userCanVote();
+  let h = `<div class="flex justify-between items-baseline mb-1"><h2 class="text-lg font-extrabold">🗳️ 1차 투표: 추방 후보 지목 <span class="text-xs text-slate-400">(${G.voteNo}/${CFG.maxVotes}회차)</span></h2>${tmr()}</div>
+    <p class="text-xs text-slate-300 mb-3">${esc(reason)} · 생존 ${al.length}명</p><div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5 mb-3">`;
+  al.forEach(p => { h += `<button data-v="${p.id}" class="flex items-center gap-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600 px-2 py-2 text-xs text-left ${can && !p.isUser ? '' : 'opacity-60 pointer-events-none'}">${chip(p)}<span class="truncate">${p.name}${p.isUser ? ' (나)' : ''}</span></button>`; });
+  h += `</div>` + (can ? `<button data-v="-1" class="w-full rounded-lg bg-slate-500 hover:bg-slate-400 font-bold py-2">건너뛰기 (스킵)</button>` : `<div class="text-center text-slate-300 text-sm">${WHY_NOT()} 투표 진행 중…</div>`);
+  meetShow(h);
+}
+function uiVote1Result(rows, skip, candId) {
+  const cand = candId >= 0 ? byId(candId) : null;
+  let h = `<h2 class="text-lg font-extrabold mb-2">1차 투표 결과</h2><div class="space-y-1 mb-3 text-sm">`;
+  rows.forEach(([id, n]) => { const p = byId(id); if (p) h += `<div class="flex items-center gap-2">${chip(p)}<span class="w-20">${p.name}</span><div class="h-3 rounded bg-rose-500" style="width:${n * 14}px"></div><b>${n}표</b></div>`; });
+  h += `<div class="flex items-center gap-2 text-slate-300"><span class="w-3"></span><span class="w-20">스킵</span><div class="h-3 rounded bg-slate-500" style="width:${Math.min(skip * 6, 180)}px"></div><b>${skip}표</b></div></div>`;
+  h += cand ? `<div class="text-center font-bold text-amber-300">최다 득표: ${cand.name} → 최후 변론으로 넘어갑니다</div>` : `<div class="text-center font-bold text-slate-200">${rows.length ? '동률로 후보가 정해지지 않았습니다' : '아무도 지목되지 않았습니다'} → 다음 미션 라운드</div>`;
+  meetShow(h);
+}
+function uiDefense() {
+  const cand = G.cand;
+  meetShow(`<div class="flex justify-between items-baseline mb-1"><h2 class="text-lg font-extrabold">🎤 최후 변론</h2>${tmr()}</div>
+    <div class="flex items-center gap-2 mb-2 text-sm">추방 후보: ${chip(cand)}<b>${cand.name}${cand.isUser ? ' (나)' : ''}</b></div>
+    <div id="chatLog" class="chat-log h-44 overflow-y-auto rounded-lg bg-black/40 p-2 text-sm space-y-1 mb-2" style="height:11rem;overflow-y:auto;user-select:text;-webkit-user-select:text"></div>
+    <form id="chatForm" class="flex gap-2" style="display:flex"><input id="chatIn" maxlength="80" autocomplete="off" class="flex-1 min-w-0 rounded-lg bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 ring-amber-400 disabled:opacity-50" style="flex:1;min-width:0;user-select:text;-webkit-user-select:text;touch-action:auto">
+    <button id="chatBtn" class="rounded-lg bg-amber-400 text-slate-900 font-bold px-4 disabled:opacity-40">전송</button></form>`);
+  chatAdd(null, `${cand.name} 님의 최후 변론 시간입니다. (${CFG.defenseTime}초)`, true);
+  if (CFG.chatMode !== 'all') chatAdd(null, CHAT_KO[CFG.chatMode], true);
+  refreshChatUI();
+}
+function uiVote2() {
+  const c = G.cand;
+  meetShow(`<div class="flex justify-between items-baseline mb-2"><h2 class="text-lg font-extrabold">⚖️ 2차 투표: 찬반</h2>${tmr()}</div>
+    <div class="text-center my-4 text-base flex items-center justify-center gap-2">${chip(c)}<b>${c.name}${c.isUser ? ' (나)' : ''}</b> 님을 추방할까요?</div>
+    <div class="text-center text-xs text-slate-400 mb-3">과반수 찬성 시 추방됩니다</div>` +
+    (userCanVote() ? `<div class="grid grid-cols-2 gap-2"><button data-y="1" class="rounded-lg bg-rose-600 hover:bg-rose-500 font-extrabold py-3">찬성 (추방)</button><button data-y="0" class="rounded-lg bg-sky-600 hover:bg-sky-500 font-extrabold py-3">반대</button></div>` : `<div class="text-center text-slate-300 text-sm">${WHY_NOT()} 투표 진행 중…</div>`));
+}
+function uiVote2Result(yes, no, out) {
+  const c = G.cand;
+  meetShow(`<h2 class="text-lg font-extrabold mb-3">2차 투표 결과</h2>
+    <div class="flex h-7 rounded-lg overflow-hidden mb-2 text-xs font-bold" style="display:flex"><div class="bg-rose-600 flex items-center justify-center" style="width:${yes / Math.max(1, yes + no) * 100}%">${yes ? '찬성 ' + yes : ''}</div><div class="bg-sky-600 flex items-center justify-center flex-1" style="flex:1">${no ? '반대 ' + no : ''}</div></div>
+    <div id="v2msg" class="text-center font-bold mt-3">${out ? `과반수 찬성 — ${c.name} 님이 추방됩니다…` : `과반수에 미치지 못했습니다 — ${c.name} 님은 남습니다`}</div>`);
+}
+function uiEject(c) { const el = $('v2msg'); if (el) el.innerHTML = `${c.name} 님은 <span class="${c.role === 'zombie' ? 'text-rose-400' : 'text-emerald-400'}">${c.role === 'zombie' ? '좀비였습니다 🧟' : '학생이었습니다 🧑‍🎨'}</span>`; }
+
+// ---- 방장 진행 로직 ----
+function startVote1(reason) {
+  if (!isHost() || G.phase !== 'mission') return;
+  closeMini(true); G.phase = 'vote1'; G.voteNo++; G.t = players.some(p => p.alive && !p.isBot) ? CFG.vote1Time : 3;
+  players.forEach(p => { p.voted = false; p.netVote1 = -1; p.netVote2 = false; }); freezeAll();
+  uiVote1(reason); broadcast({ t: 'vote1', reason, no: G.voteNo, time: G.t });
+}
+function finishVote1() {
+  if (!isHost() || G.phase !== 'vote1') return; G.phase = 'vote1r';
+  const cnt = new Map(); let skip = 0;
+  aliveList().forEach(p => { const v = p.isBot ? AI.vote1(p) : (p.voted ? p.netVote1 : -1), tg = v >= 0 ? byId(v) : null;
+    if (!tg || !tg.alive || tg === p) skip++; else cnt.set(v, (cnt.get(v) || 0) + 1); });
+  const rows = [...cnt.entries()].sort((a, b) => b[1] - a[1]);
+  const cand = rows.length && (rows.length === 1 || rows[0][1] > rows[1][1]) ? byId(rows[0][0]) : null;
+  uiVote1Result(rows, skip, cand ? cand.id : -1); broadcast({ t: 'vote1r', rows, skip, cand: cand ? cand.id : -1 });
+  after(cand ? 3.5 : 3, () => cand && cand.alive ? startDefense(cand) : endVoteCycle());
+}
+function startDefense(cand) {
+  G.phase = 'defense'; G.cand = cand; G.accusedBy = new Set(); G.t = CFG.defenseTime;
+  uiDefense(); broadcast({ t: 'defense', c: cand.id, time: G.t }); AI.onDefenseStart(cand);
+}
+function startVote2() {
+  G.phase = 'vote2'; G.t = players.some(p => p.alive && !p.isBot) ? CFG.vote2Time : 3;
+  players.forEach(p => { p.voted = false; p.netVote2 = false; });
+  uiVote2(); broadcast({ t: 'vote2', time: G.t });
+}
+function finishVote2() {
+  if (!isHost() || G.phase !== 'vote2') return; G.phase = 'vote2r'; const c = G.cand; let yes = 0, no = 0;
+  aliveList().forEach(p => { const y = p === c ? false : p.isBot ? !!AI.vote2(p, c) : (p.voted && p.netVote2); y ? yes++ : no++; });
+  const out = c.alive && yes > (yes + no) / 2;
+  uiVote2Result(yes, no, out); broadcast({ t: 'vote2r', yes, no, out });
+  if (!out) { after(3, endVoteCycle); return; }
+  after(2, () => { c.alive = false; c.ejected = true; c.corpse = null; uiEject(c); broadcast({ t: 'eject', id: c.id, role: c.role }); after(3, endVoteCycle); });
+}
+function endVoteCycle() {
+  players.forEach(p => { p.corpse = null; });
+  if (checkWin()) return;
+  if (G.voteNo >= CFG.maxVotes) { endGame('zombie', `제한 투표 횟수(${CFG.maxVotes}회)를 모두 사용했습니다`); return; }
+  startRound();
+}
+// ---- 변론 채팅 (방장의 채팅 금지 설정을 여기 한 곳에서 판정) ----
+function canChat(p) { return G.phase === 'defense' && !!p && p.alive && (CFG.chatMode === 'all' || (CFG.chatMode === 'cand' && p === G.cand)); }
+function chatAdd(p, text, sys) {
+  const log = $('chatLog'); if (!log) return; const d = document.createElement('div');
+  d.innerHTML = sys ? `<span class="text-amber-300">${esc(text)}</span>` : `<span class="inline-flex items-center gap-1 align-middle">${chip(p)} <b>${p.name}${p.isUser ? '(나)' : ''}</b></span> ${esc(text)}`;
+  log.appendChild(d); log.scrollTop = 1e9;
+}
+// 방장 기기: 모든 플레이어(봇 포함)의 발언은 이 함수를 거쳐 전원에게 전달됨
+function say(p, text) { if (!isHost() || !canChat(p)) return false; chatAdd(p, text); broadcast({ t: 'chat', id: p.id, x: text }); return true; }
+function chatSys(text) { chatAdd(null, text, true); broadcast({ t: 'chat', sys: 1, x: text }); }
+function refreshChatUI() {
+  const inp = $('chatIn'), btn = $('chatBtn'); if (!inp) return;
+  const can = U.mode !== 'host' && canChat(U.me); inp.disabled = btn.disabled = !can;
+  inp.placeholder = can ? '메시지를 입력하세요' : U.mode === 'host' ? '방장은 변론에 참여하지 않습니다' : !U.me.alive ? '사망자는 채팅할 수 없습니다 (관전만 가능)'
+    : CFG.chatMode === 'none' ? '방장이 채팅을 금지했습니다' : '지금은 변론자만 채팅할 수 있습니다';
+}
+const CHAT_KO = { all: '채팅이 허용되었습니다', cand: '방장이 변론자 외의 채팅을 금지했습니다', none: '방장이 채팅을 금지했습니다' };
+$('meetBody').addEventListener('click', e => { // 참가자의 투표
+  const b = e.target.closest('button'); if (!b || !userCanVote() || G.userVote !== undefined) return;
+  const done = () => { $('meetBody').querySelectorAll('button[data-v],button[data-y]').forEach(x => { x.style.pointerEvents = 'none'; if (x !== b) x.style.opacity = 0.35; else x.style.outline = '2px solid #ffd92e'; });
+    const d = document.createElement('div'); d.className = 'text-center text-emerald-300 text-sm mt-2'; d.textContent = '투표 완료! 다른 플레이어를 기다리는 중…'; $('meetBody').appendChild(d); };
+  if (G.phase === 'vote1' && b.dataset.v !== undefined) { G.userVote = +b.dataset.v; toHost({ t: 'vote1', v: G.userVote }); done(); }
+  else if (G.phase === 'vote2' && b.dataset.y !== undefined) { G.userVote = +b.dataset.y; toHost({ t: 'vote2', y: G.userVote }); done(); }
+});
+$('meetBody').addEventListener('submit', e => {
+  e.preventDefault(); const inp = $('chatIn'); if (!inp || U.mode === 'host') return;
+  const t = inp.value.trim(); if (!t) return;
+  if (!canChat(U.me)) { refreshChatUI(); return; } // 금지 상태면 전송되지 않음(방장 기기에서도 다시 확인함)
+  toHost({ t: 'chat', x: t }); inp.value = '';
+});
+// ---- 대기방 채팅: 게임 시작 전 플레이어와 방장이 함께 쓰는 채팅 ----
+let lcOpen = false, lcUnread = 0;
+function lobbyChatAdd(name, color, text, sys) {
+  const log = $('lcLog'), d = document.createElement('div');
+  d.innerHTML = sys ? `<span class="text-amber-300">${esc(text)}</span>` : `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${hex(color)};border:1px solid #fff8;margin-right:3px"></span><b>${esc(name)}</b> ${esc(text)}`;
+  log.appendChild(d); while (log.children.length > 80) log.firstChild.remove(); log.scrollTop = 1e9;
+  if (!lcOpen && !sys) { lcUnread++; refreshLobbyChat(); }
+}
+// 방장 기기. p = 플레이어, null = 방장. '전체 금지'면 플레이어는 대기방에서도 채팅 불가(방장은 항상 가능)
+function hostLobbySay(p, text) {
+  text = String(text || '').trim(); if (!isHost() || !text || G.phase !== 'lobby' || (p && CFG.chatMode === 'none')) return false;
+  lobbyChatAdd(p ? p.name : '👑 방장(나)', p ? p.color : 0xffd92e, text); broadcast({ t: 'lchat', id: p ? p.id : -1, x: text }); return true;
+}
+function hostLobbySys(text) { if (G.phase !== 'lobby') return; lobbyChatAdd('', 0, text, true); broadcast({ t: 'lchat', sys: 1, x: text }); }
+function refreshLobbyChat() {
+  const on = G.phase === 'lobby'; $('lcToggle').classList.toggle('hidden', !on); $('lobbyChat').classList.toggle('hidden', !on || !lcOpen);
+  if (!on) return;
+  const b = $('lcBadge'); b.textContent = lcUnread; b.classList.toggle('hidden', lcOpen || !lcUnread);
+  const muted = U.mode !== 'host' && CFG.chatMode === 'none'; $('lcIn').disabled = $('lcBtn').disabled = muted;
+  $('lcIn').placeholder = muted ? '방장이 채팅을 금지했습니다' : '대기방 채팅';
+  const top = Math.round($(U.mode === 'host' ? 'hostPanel' : 'waitPanel').getBoundingClientRect().bottom) + 8; // 위쪽 패널 바로 아래에 배치
+  $('lcToggle').style.top = top + 'px'; $('lobbyChat').style.top = (top + 34) + 'px';
+}
+$('lcToggle').addEventListener('click', () => { lcOpen = !lcOpen; if (lcOpen) lcUnread = 0; refreshLobbyChat(); $('lcLog').scrollTop = 1e9; });
+$('lcForm').addEventListener('submit', e => { e.preventDefault(); const inp = $('lcIn'), t = inp.value.trim(); if (!t || G.phase !== 'lobby') return;
+  if (isHost()) hostLobbySay(null, t); else if (CFG.chatMode === 'none') { refreshLobbyChat(); return; } else toHost({ t: 'lchat', x: t });
+  inp.value = ''; });
+
+/* =====================================================================
+ * 11. HUD / 미니맵 / 토스트
+ * ===================================================================== */
+let toastT = 0;
+function toast(msg, sec = 2.6) { const t = $('toast'); t.textContent = msg; t.style.opacity = 1; toastT = sec; }
+const PHASE_KO = { lobby: '대기방', mission: '미션 진행', vote1: '1차 투표', vote1r: '1차 결과', defense: '최후 변론', vote2: '2차 투표', vote2r: '2차 결과', ended: '게임 종료' };
+function updateHUD() {
+  const me = U.me, role = $('hudRole'), host = U.mode === 'host', lobby = G.phase === 'lobby', B = 'px-2 py-0.5 rounded-full font-bold text-[11px] ';
+  if (!host && !me) return;
+  if (host) { role.textContent = '👑 방장'; role.className = B + 'bg-indigo-500'; }
+  else if (lobby) { role.textContent = '⏳ 대기 중'; role.className = B + 'bg-amber-400 text-slate-900'; }
+  else if (U.ghost) { role.textContent = '👻 사망 · ' + (me.role === 'zombie' ? '좀비' : '학생'); role.className = B + 'bg-slate-500'; }
+  else if (me.role === 'zombie') { role.textContent = '🧟 좀비'; role.className = B + 'bg-rose-600'; }
+  else { role.textContent = '🧑‍🎨 학생'; role.className = B + 'bg-emerald-500 text-slate-900'; }
+  const px = isFree() ? U.fp.x : me.x, pz = isFree() ? U.fp.z : me.z; $('hudRoom').textContent = roomAt(px, pz);
+  const al = aliveList(), zs = al.filter(p => p.role === 'zombie').length;
+  let mh = '';
+  if (lobby) mh = `<div>입장한 플레이어 ${players.length}명</div><div class="text-slate-400">${host ? '규칙을 정하고 게임을 시작하세요' : '돌아다니며 기다리세요'}</div>`;
+  else if (U.ghost) mh = `<div class="text-slate-300">사망 — 관전 중</div><div class="text-slate-400">미션·채팅·투표는 할 수 없습니다</div>`;
+  else if (host) mh = `<div>생존 ${al.length}명 (학생 ${al.length - zs} · 좀비 ${zs})</div><div class="text-slate-400">자유 시점으로 관전 중</div>`;
+  else if (me.role === 'student') mh = me.missions.map((mi, k) => `<div class="${me.done[k] ? 'text-emerald-400 line-through' : 'text-amber-200'}">${me.done[k] ? '✔' : '○'} ${MISSIONS[mi].name}</div>`).join('');
+  else mh = `<div class="text-rose-200">학생인 척하며 처치하세요</div><div class="text-fuchsia-300">미니맵 터치 = 구석으로 순간이동</div><div class="text-slate-300">동료 좀비: ${players.filter(p => p.role === 'zombie' && !p.isUser).map(p => p.name).join(', ') || '없음'}</div>`;
+  $('hudMissions').innerHTML = mh;
+  $('hudPhase').textContent = (PHASE_KO[G.phase] || '') + (G.paused ? ' (일시정지)' : '') + (G.round ? ` · R${G.round}` : '');
+  const t = Math.max(0, Math.ceil(G.t)); $('hudTimer').textContent = ['mission', 'vote1', 'defense', 'vote2'].includes(G.phase) ? `${(t / 60) | 0}:${String(t % 60).padStart(2, '0')}` : '--:--';
+  const mt = $('meetT'); if (mt) mt.textContent = t + '초';
+  const st = missionStats(); $('hudBar').style.width = (st.total ? st.done / st.total * 100 : 0) + '%';
+  $('hudVotes').textContent = lobby ? `방 코드 ${NET.code} · 접속 ${players.length}/${N}` : `전체 미션 ${st.done}/${st.total} · 투표 ${G.voteNo}/${CFG.maxVotes} · 생존 ${al.length}`;
+  $('btnJump').classList.toggle('hidden', host || isFree());
+  mini.style.pointerEvents = U.mode === 'zombie' && !U.ghost && !lobby ? 'auto' : 'none'; // 좀비만 미니맵 터치 가능
+  if (lobby && frame % 30 === 0) refreshLobbyChat();
+  if (host) { $('roomCount').textContent = `${humans().length}명 접속` + (players.length > humans().length ? ` + 봇 ${players.length - humans().length}` : ''); return; }
+  if (lobby) { // 대기방: 규칙은 읽기 전용으로만 보여 줌
+    $('waitRules').textContent = `미션 ${CFG.missionTime}초 · 최후 변론 ${CFG.defenseTime}초 · 투표 ${CFG.maxVotes}회 · 좀비 ${CFG.zombies}명 · 킬 쿨타임 ${CFG.killCooldown}초 · 순간이동 ${CFG.teleportCooldown}초`;
+    $('waitInfo').textContent = `방 코드 ${NET.code} · 현재 ${players.length}명 입장 · 방장이 시작하면 역할이 배정됩니다`;
+  }
+  scanActions(); const u = $('btnUse'), k = $('btnKill'), a = $('btnAct');
+  u.classList.toggle('off', act.mission < 0); u.firstChild.textContent = me.role === 'zombie' && !lobby ? '🎭 미션 하는 척' : '🎨 미션 수행';
+  k.classList.toggle('off', !act.victim || me.killCd > 0); k.firstChild.textContent = me.killCd > 0 ? `🧟 공격 ${Math.ceil(me.killCd)}s` : '🧟 공격';
+  a.classList.toggle('off', !act.corpse && !act.emerg); a.firstChild.textContent = act.emerg ? '🚨 비상 투표' : '📣 시체 신고';
+}
+const mini = $('mini'), mg = mini.getContext('2d'), miniBg = document.createElement('canvas'); miniBg.width = 288; miniBg.height = 160;
+(function drawMiniBg() { const g = miniBg.getContext('2d'), s = 2; g.fillStyle = '#0c101a'; g.fillRect(0, 0, 288, 160);
+  ROOMS.forEach(r => { g.fillStyle = hex(r.color); g.globalAlpha = 0.55; g.fillRect((r.x0 - MAP.x0) * s, (r.z0 - MAP.z0) * s, (r.x1 - r.x0) * s, (r.z1 - r.z0) * s); });
+  g.globalAlpha = 1; g.fillStyle = '#10141f'; tallColliders.forEach(c => g.fillRect((c.x0 - MAP.x0) * s, (c.z0 - MAP.z0) * s, Math.max(1, (c.x1 - c.x0) * s), Math.max(1, (c.z1 - c.z0) * s))); })();
+mini.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  if (U.mode !== 'zombie' || U.ghost || miniOpen || G.paused || G.phase !== 'mission') return;
+  if (U.me.tpCd > 0) { toast(`순간이동 대기 ${Math.ceil(U.me.tpCd)}초`); return; }
+  const r = mini.getBoundingClientRect(), mx = MAP.x0 + (e.clientX - r.left) / r.width * (MAP.x1 - MAP.x0), mz = MAP.z0 + (e.clientY - r.top) / r.height * (MAP.z1 - MAP.z0);
+  if (teleportToCorner(U.me, mx, mz)) toast('구석으로 순간이동!');
+});
+function drawMini() {
+  if (U.mode !== 'host' && !U.me) return;
+  const s = 2; mg.drawImage(miniBg, 0, 0);
+  MISSIONS.forEach(m => { mg.fillStyle = m.strong ? '#ffd92e' : 'rgba(255,255,255,.25)'; mg.beginPath(); mg.arc((m.x - MAP.x0) * s, (m.z - MAP.z0) * s, m.strong ? 5 : 3, 0, 7); mg.fill(); });
+  if (isFree()) players.forEach(p => { if (!p.alive) return; mg.fillStyle = hex(p.color); mg.fillRect((p.x - MAP.x0) * s - 2, (p.z - MAP.z0) * s - 2, 4, 4); });
+  if (U.mode === 'zombie' && !U.ghost && G.phase !== 'lobby') { // 순간이동 도착지와 쿨타임
+    const rdy = U.me.tpCd <= 0; mg.fillStyle = rdy ? '#e08bff' : '#6a5a78'; CORNERS.forEach(c => mg.fillRect((c[0] - MAP.x0) * s - 8, (c[1] - MAP.z0) * s - 8, 16, 16));
+    mg.fillStyle = '#fff'; mg.strokeStyle = '#000'; mg.lineWidth = 3; mg.font = 'bold 17px sans-serif'; mg.textAlign = 'center';
+    const tx = rdy ? '터치: 구석으로 순간이동' : `순간이동 ${Math.ceil(U.me.tpCd)}초`; mg.strokeText(tx, 144, 152); mg.fillText(tx, 144, 152); }
+  const px = isFree() ? U.fp.x : U.me.x, pz = isFree() ? U.fp.z : U.me.z, x = (px - MAP.x0) * s, y = (pz - MAP.z0) * s;
+  mg.save(); mg.translate(x, y); mg.rotate(-U.yaw); mg.fillStyle = '#fff'; mg.strokeStyle = '#000'; mg.lineWidth = 1.5; mg.beginPath(); mg.moveTo(0, 8); mg.lineTo(-5, -5); mg.lineTo(5, -5); mg.closePath(); mg.fill(); mg.stroke(); mg.restore();
+}
+
+/* =====================================================================
+ * 12. 시작 화면(방 만들기 / 코드로 입장) · 방장 패널
+ * ===================================================================== */
+// 규칙은 방장만 바꿀 수 있고, 바뀔 때마다 전원에게 전달됨
+function syncCfg() { document.querySelectorAll('[data-cfg]').forEach(i => { i.value = CFG[i.dataset.cfg]; }); }
+document.querySelectorAll('[data-cfg]').forEach(i => i.addEventListener('change', () => {
+  if (!isHost()) { syncCfg(); return; }
+  CFG[i.dataset.cfg] = clamp(parseInt(i.value, 10) || +i.min, +i.min, +i.max); syncCfg(); broadcast({ t: 'cfg', cfg: cfgData() }); }));
+syncCfg();
+$('btnJoin').addEventListener('click', () => {
+  const nick = cleanNick($('nick').value), code = $('joinCode').value.replace(/\D/g, '');
+  if (!nick) { netMsg('닉네임을 입력해 주세요'); $('nick').focus(); return; }
+  if (code.length !== 6) { netMsg('방장에게 받은 6자리 입장 코드를 입력해 주세요'); $('joinCode').focus(); return; }
+  $('nick').blur(); $('joinCode').blur(); clientJoin(code, nick);
+});
+$('btnHost').addEventListener('click', () => {
+  if ($('adminKey').value !== ADMIN_KEY) { netMsg('admin 키가 올바르지 않습니다'); $('adminKey').value = ''; $('adminKey').focus(); return; }
+  $('adminKey').value = ''; $('adminKey').blur(); hostCreateRoom(0);
+});
+$('nick').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinCode').focus(); });
+$('joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnJoin').click(); });
+$('adminKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnHost').click(); });
+$('hostStart').addEventListener('click', () => beginMatch());
+$('hostPause').addEventListener('click', () => { if (!isHost() || G.phase === 'lobby' || G.phase === 'ended') return; G.paused = !G.paused; $('hostPause').textContent = G.paused ? '재개' : '일시정지'; });
+$('hostVote').addEventListener('click', () => { if (G.phase === 'mission' && !G.paused) startVote1('방장이 회의를 소집했습니다'); });
+$('hostReset').addEventListener('click', () => { if (isHost()) hostEnterLobby(); });
+$('hostClose').addEventListener('click', () => { if (isHost()) leaveRoom('방을 닫았습니다'); });
+$('hostChat').addEventListener('change', e => { // 방장: 채팅 금지 제어 (대기방·변론 중에도 즉시 적용)
+  if (!isHost()) return; CFG.chatMode = e.target.value; toast(CHAT_KO[CFG.chatMode]); broadcast({ t: 'cfg', cfg: cfgData() });
+  if (G.phase === 'defense') { chatSys(CHAT_KO[CFG.chatMode]); refreshChatUI(); }
+  if (G.phase === 'lobby') { hostLobbySys(CFG.chatMode === 'none' ? '방장이 채팅을 금지했습니다' : '채팅이 허용되었습니다'); refreshLobbyChat(); }
+});
+$('endBtn').addEventListener('click', () => { if (isHost()) hostEnterLobby(); }); // 방장: 모두 함께 대기방으로
+$('endExit').addEventListener('click', () => leaveRoom(''));
+
+/* ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+ * AI BOT MODULE START  (테스트 전용 — 방장 기기에서만 동작)
+ *   방장이 대기방에서 "(테스트) AI 봇 채우기"를 켰을 때만 빈 자리에 봇이 들어옵니다. 참가자 기기에는 봇을 켜는 방법이 없습니다.
+ *   완전히 빼려면: 맨 위의 ENABLE_BOTS 를 false 로 바꾸거나, 이 START~END 블록을 통째로 삭제하세요(체크박스도 함께 사라짐).
+ *   코어는 위의 AI 훅(기본값 = 아무 일도 안 함)만 호출하므로 삭제해도 오류가 나지 않습니다.
+ *   이 블록 안에만 있는 것: 길찾기 그리드, 봇 이동/미션/처치 판단, 봇 투표, 봇 채팅.
+ * ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ */
+if (ENABLE_BOTS) (function installBots() {
+  // ---- 내비게이션 그리드 (BFS + 직선 스무딩) ----
+  const NX = MAP.x1 - MAP.x0, NZ = MAP.z1 - MAP.z0, NAVR = 0.45;
+  const nav = new Uint8Array(NX * NZ), reach = new Uint8Array(NX * NZ), reachList = [];
+  const navPrev = new Int32Array(NX * NZ), navQ = new Int32Array(NX * NZ);
+  const cellOf = (x, z) => { const i = Math.floor(x - MAP.x0), j = Math.floor(z - MAP.z0); return (i < 0 || j < 0 || i >= NX || j >= NZ) ? -1 : i + j * NX; };
+  const cellX = c => MAP.x0 + (c % NX) + 0.5, cellZ = c => MAP.z0 + ((c / NX) | 0) + 0.5;
+  colliders.forEach(c => {
+    const i0 = Math.max(0, Math.ceil(c.x0 - NAVR - MAP.x0 - 0.5)), i1 = Math.min(NX - 1, Math.floor(c.x1 + NAVR - MAP.x0 - 0.5));
+    const j0 = Math.max(0, Math.ceil(c.z0 - NAVR - MAP.z0 - 0.5)), j1 = Math.min(NZ - 1, Math.floor(c.z1 + NAVR - MAP.z0 - 0.5));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) nav[i + j * NX] = 1;
+  });
+  { let h = 0, t = 0; const s = cellOf(0, 0.5); navQ[t++] = s; reach[s] = 1; // 스폰에서 닿는 칸만 목적지로 사용
+    while (h < t) { const c = navQ[h++], i = c % NX, j = (c / NX) | 0; reachList.push(c);
+      if (i > 0 && !nav[c - 1] && !reach[c - 1]) { reach[c - 1] = 1; navQ[t++] = c - 1; }
+      if (i < NX - 1 && !nav[c + 1] && !reach[c + 1]) { reach[c + 1] = 1; navQ[t++] = c + 1; }
+      if (j > 0 && !nav[c - NX] && !reach[c - NX]) { reach[c - NX] = 1; navQ[t++] = c - NX; }
+      if (j < NZ - 1 && !nav[c + NX] && !reach[c + NX]) { reach[c + NX] = 1; navQ[t++] = c + NX; } } }
+  function cellNear(x, z) {
+    const c = cellOf(x, z); if (c >= 0 && reach[c]) return c;
+    const ci = Math.floor(x - MAP.x0), cj = Math.floor(z - MAP.z0); let best = -1, bd = 1e9;
+    for (let r = 1; r <= 8 && best < 0; r++) for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) {
+      if (i < 0 || j < 0 || i >= NX || j >= NZ) continue; const k = i + j * NX; if (!reach[k]) continue;
+      const d = (cellX(k) - x) ** 2 + (cellZ(k) - z) ** 2; if (d < bd) { bd = d; best = k; } }
+    return best;
+  }
+  function navLOS(x0, z0, x1, z1) {
+    const d = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(d / 0.3));
+    for (let k = 0; k <= n; k++) { const c = cellOf(x0 + (x1 - x0) * k / n, z0 + (z1 - z0) * k / n); if (c < 0 || nav[c]) return false; }
+    return true;
+  }
+  function findPath(sx, sz, tx, tz) {
+    const s = cellNear(sx, sz), t = cellNear(tx, tz); if (s < 0 || t < 0) return null;
+    navPrev.fill(-1); let h = 0, q = 0; navQ[q++] = t; navPrev[t] = t;
+    while (h < q) {
+      const c = navQ[h++]; if (c === s) break; const i = c % NX, j = (c / NX) | 0;
+      const L = i > 0 && !nav[c - 1], R = i < NX - 1 && !nav[c + 1], Up = j > 0 && !nav[c - NX], D = j < NZ - 1 && !nav[c + NX];
+      if (L && navPrev[c - 1] < 0) { navPrev[c - 1] = c; navQ[q++] = c - 1; }
+      if (R && navPrev[c + 1] < 0) { navPrev[c + 1] = c; navQ[q++] = c + 1; }
+      if (Up && navPrev[c - NX] < 0) { navPrev[c - NX] = c; navQ[q++] = c - NX; }
+      if (D && navPrev[c + NX] < 0) { navPrev[c + NX] = c; navQ[q++] = c + NX; }
+      if (L && Up && !nav[c - NX - 1] && navPrev[c - NX - 1] < 0) { navPrev[c - NX - 1] = c; navQ[q++] = c - NX - 1; }
+      if (R && Up && !nav[c - NX + 1] && navPrev[c - NX + 1] < 0) { navPrev[c - NX + 1] = c; navQ[q++] = c - NX + 1; }
+      if (L && D && !nav[c + NX - 1] && navPrev[c + NX - 1] < 0) { navPrev[c + NX - 1] = c; navQ[q++] = c + NX - 1; }
+      if (R && D && !nav[c + NX + 1] && navPrev[c + NX + 1] < 0) { navPrev[c + NX + 1] = c; navQ[q++] = c + NX + 1; }
+    }
+    if (navPrev[s] < 0) return null;
+    const raw = [[cellX(s), cellZ(s)]]; let c = s;
+    while (c !== t) { c = navPrev[c]; raw.push([cellX(c), cellZ(c)]); }
+    if (cellOf(tx, tz) === t) raw.push([tx, tz]);
+    const out = []; let i = 0; // 스무딩: 직선으로 갈 수 있는 가장 먼 지점까지 건너뜀
+    while (i < raw.length - 1) { let j = Math.min(raw.length - 1, i + 28); while (j > i + 1 && !navLOS(raw[i][0], raw[i][1], raw[j][0], raw[j][1])) j--; out.push(raw[j]); i = j; }
+    return out.length ? out : [raw[0]];
+  }
+  // ---- 행동 ----
+  const bots = () => players.filter(p => p.isBot);
+  function setPath(b, tx, tz) { const p = findPath(b.x, b.z, tx, tz); if (!p) { b.state = 'wait'; b.timer = 0.5; return false; } b.path = p; b.pi = 0; b.state = 'move'; return true; }
+  function chooseGoal(b) {
+    if (G.phase === 'lobby') { // 대기방: 복도 근처를 어슬렁거림
+      let c = pick(reachList); for (let k = 0; k < 20 && (Math.abs(cellX(c)) > 28 || Math.abs(cellZ(c)) > 5); k++) c = pick(reachList);
+      b.intent = 'wander'; setPath(b, cellX(c), cellZ(c)); return; }
+    if (b.role === 'zombie') {
+      const studs = players.filter(p => p.alive && p.role === 'student');
+      if (studs.length && Math.random() < 0.55) { b.tgt = pick(studs); b.intent = 'stalk'; b.timer = 14; b.repath = 1.2; setPath(b, b.tgt.x, b.tgt.z); }
+      else { const m = pick(MISSIONS); b.intent = 'fake'; setPath(b, m.x + rand(-1, 1), m.z + rand(-1, 1)); }
+      return;
+    }
+    const left = b.done.map((d, i) => d ? -1 : i).filter(i => i >= 0);
+    if (left.length && b.wander <= 0) { b.mi = pick(left); const m = MISSIONS[b.missions[b.mi]]; b.intent = 'mission'; setPath(b, m.x + rand(-1, 1), m.z + rand(-1, 1)); }
+    else { b.wander--; const c = pick(reachList); b.intent = 'wander'; setPath(b, cellX(c), cellZ(c)); }
+  }
+  function think(b, dt) {
+    b.moving = false;
+    if (b.state === 'idle') chooseGoal(b);
+    else if (b.state === 'move') {
+      const wp = b.path[b.pi], dx = wp[0] - b.x, dz = wp[1] - b.z, d = Math.hypot(dx, dz), step = b.speed * dt;
+      if (d <= step) { b.x = wp[0]; b.z = wp[1]; if (++b.pi >= b.path.length) {
+        if (b.intent === 'mission' || b.intent === 'fake') { b.state = 'work'; b.timer = rand(7, 13); }
+        else { b.state = 'wait'; b.timer = b.intent === 'stalk' ? 0.4 : rand(1, 3.5); } } }
+      else { b.x += dx / d * step; b.z += dz / d * step; let da = Math.atan2(dx, dz) - b.yaw; da = Math.atan2(Math.sin(da), Math.cos(da)); b.yaw += da * Math.min(1, dt * 12); b.phase += dt * 11; b.moving = true; if (G.phase === 'lobby' && Math.random() < dt * 0.2) jump(b); }
+      if (b.intent === 'stalk' && b.state === 'move') { b.timer -= dt; b.repath -= dt;
+        if (b.timer <= 0 || !b.tgt.alive) b.state = 'idle'; else if (b.repath <= 0) { b.repath = 1.2; setPath(b, b.tgt.x, b.tgt.z); } }
+    }
+    else if (b.state === 'work') { b.timer -= dt; if (b.timer <= 0) { if (b.role === 'student' && b.intent === 'mission') { b.done[b.mi] = true; checkWin(); } b.wander = 1 + ((Math.random() * 2) | 0); b.state = 'idle'; } }
+    else if (b.state === 'wait') { b.timer -= dt; if (b.timer <= 0) b.state = 'idle'; }
+    b.working = b.state === 'work';
+    if (b.role === 'zombie' && b.alive && (b.kt -= dt) <= 0) { b.kt = 0.4; tryKill(b); }
+  }
+  function tryKill(b) {
+    if (b.killCd > 0) return; let v = null, bd = CFG.killRange;
+    players.forEach(p => { if (!p.alive || p.role !== 'student') return; const d = Math.hypot(p.x - b.x, p.z - b.z); if (d < bd && !sightBlocked(b.x, b.z, p.x, p.z)) { bd = d; v = p; } });
+    if (!v) return; let w = 0;
+    players.forEach(p => { if (p.alive && p.role === 'student' && p !== v && Math.hypot(p.x - b.x, p.z - b.z) < CFG.witnessRange && !sightBlocked(p.x, p.z, b.x, b.z)) w++; });
+    if (w === 0 || (w === 1 && Math.random() < 0.12)) kill(b, v);
+  }
+  // ---- 코어 훅 구현 ----
+  Object.assign(AI, {
+    available: true,
+    initPlayer(p) { Object.assign(p, { state: 'idle', intent: '', path: null, pi: 0, timer: 0, wander: 0, mi: 0, tgt: null, repath: 0, kt: Math.random(), speed: rand(3.6, 4.4), susp: new Float32Array(N) }); },
+    onRoundStart() { bots().forEach(b => { if (b.alive) { b.state = 'idle'; b.path = null; } }); },
+    onLobby() { // 봇이 대기방에서 인사말을 몇 마디 함
+      const lines = ['안녕하세요!', '빨리 시작해요~', '이번엔 누가 좀비일까요?', '저 미로에서 길 잃을 것 같아요', '방장님 준비되면 시작해 주세요!', 'ㅎㅇㅎㅇ'];
+      for (let i = 0; i < 3; i++) after(rand(1.5, 9), () => { const b = bots(); if (b.length) hostLobbySay(pick(b), pick(lines)); });
+    },
+    update(dt) { const ph = G.phase; for (const b of players) { if (!b.isBot || !b.alive) continue; think(b, dt); if (G.phase !== ph) return; } },
+    vote1(b) {
+      let best = -1, bs = 0.5;
+      players.forEach(p => { if (!p.alive || p === b) return; if (b.role === 'zombie' && p.role === 'zombie') return; if (b.susp[p.id] > bs) { bs = b.susp[p.id]; best = p.id; } });
+      if (best >= 0) return best;
+      const studs = players.filter(p => p.alive && p.role === 'student' && p !== b), others = players.filter(p => p.alive && p !== b);
+      if (b.role === 'zombie') return studs.length && Math.random() < 0.3 ? pick(studs).id : -1;
+      return others.length && Math.random() < 0.08 ? pick(others).id : -1;
+    },
+    vote2(b, c) { return b.role === 'zombie' ? Math.random() < (c.role === 'zombie' ? 0.1 : 0.85) : Math.random() < clamp(0.28 + b.susp[c.id] * 0.7, 0, 0.98); },
+    onKill(killer, victim) { // 시야가 닿는 근처 학생 봇은 범인을 기억함
+      bots().forEach(p => { if (p.alive && p !== killer && p.role === 'student' && Math.hypot(p.x - killer.x, p.z - killer.z) < CFG.witnessRange && !sightBlocked(p.x, p.z, killer.x, killer.z)) p.susp[killer.id] = 1; });
+    },
+    onAccuse(cand, w) { bots().forEach(p => { p.susp[cand.id] = Math.min(1, p.susp[cand.id] + w); }); },
+    onDefenseStart(cand) { // 봇 채팅은 say() 를 거치므로 방장의 채팅 금지가 그대로 적용됨
+      const T = CFG.defenseTime, live = bots().filter(p => p.alive);
+      if (cand.isBot) after(Math.min(1.2, T * 0.1), () => say(cand, pick(['저 아니에요! 계속 미션하고 있었어요.', `억울해요. 저는 ${roomAt(cand.x, cand.z) || '복도'}에 있었다고요!`, '증거 있어요? 저는 학생이에요.', '저를 추방하면 좀비만 좋은 일이에요!'])));
+      live.filter(b => b !== cand && b.role === 'student' && b.susp[cand.id] >= 1).slice(0, 3).forEach((w, i) => after(Math.min(T * 0.8, 2.5 + i * 2.2), () => {
+        if (say(w, pick([`제가 직접 봤어요! ${cand.name} 님이 공격했어요!`, `${cand.name} 님이 좀비예요. 제 눈앞에서 처치했어요.`]))) AI.onAccuse(cand, 0.5); }));
+      const fill = ['누가 본 사람 있어요?', '음… 좀 수상하긴 한데요.', '저는 잘 모르겠어요.', `${cand.name} 님 아까 혼자 돌아다니던데…`, '일단 변론 들어봅시다.', '확실하지 않으면 반대할게요.', '저는 미션만 했어요.'];
+      const rest = live.filter(x => x !== cand);
+      for (let i = 0, n = Math.min(5, Math.floor(T / 4)); i < n && rest.length; i++) after(rand(2, Math.max(2.5, T - 1.5)), () => say(pick(rest), pick(fill)));
+    },
+    _debug: { reach, cellOf, findPath },
+  });
+  // 방장 패널의 봇 스위치 연결 (이 모듈이 없으면 스위치 자체가 보이지 않음)
+  $('botWrap').classList.remove('hidden');
+  $('hostBots').addEventListener('change', e => { hostSetBots(e.target.checked); e.target.checked = NET.bots; });
+})();
+/* ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+ * AI BOT MODULE END
+ * ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ */
+
+/* =====================================================================
+ * 13. 메인 루프
+ * ===================================================================== */
+let last = performance.now(), frame = 0;
+function updateVisibility() { // 살아있는 참가자는 시야가 닿는 아바타만 볼 수 있음(엄폐물 뒤 은신 가능). 방장·사망자는 전부 봄
+  const free = isFree(), me = U.me;
+  for (let i = frame % 3; i < players.length; i += 3) {
+    const p = players[i];
+    if (!p.alive && !p.corpse) { p.vis = false; continue; }
+    if (free || !me) { p.vis = !p.alive || !p.isUser; continue; }
+    if (p === me) { p.vis = true; continue; }
+    const x = p.alive ? p.x : p.corpse.x, z = p.alive ? p.z : p.corpse.z, d = Math.hypot(x - me.x, z - me.z);
+    p.vis = d < CFG.sightRange && (d < 1.5 || !sightBlocked(me.x, me.z, x, z));
+  }
+}
+// 게임 로직 한 스텝(렌더링과 분리 → 탭이 백그라운드일 때도 방장 기기의 진행이 멈추지 않도록)
+function step(dt) {
+  if (!G.paused) {
+    for (let i = timers.length - 1; i >= 0; i--) { const t = timers[i]; if ((t.t -= dt) <= 0) { timers.splice(i, 1); t.fn(); } }
+    if (G.phase === 'mission' || G.phase === 'lobby') {
+      for (let i = 0; i < players.length; i++) { const p = players[i];
+        if (p.killCd > 0) p.killCd = Math.max(0, p.killCd - dt); if (p.tpCd > 0) p.tpCd = Math.max(0, p.tpCd - dt);
+        if (!p.remote && (p.y > 0 || p.vy > 0)) { p.vy -= GRAVITY * dt; p.y += p.vy * dt; if (p.y <= 0) { p.y = 0; p.vy = 0; } } } // 점프/중력(내 아바타·봇)
+      if (U.me && U.me.alive) updateUserAvatar(dt);
+      if (isHost()) AI.update(dt);
+    }
+    if (G.phase === 'mission' || G.phase === 'vote1' || G.phase === 'defense' || G.phase === 'vote2') {
+      G.t -= dt;
+      if (G.t <= 0) { G.t = 0; if (isHost()) { // 단계 전환은 방장 기기만 결정
+        if (G.phase === 'mission') startVote1('미션 시간이 종료되었습니다'); else if (G.phase === 'vote1') finishVote1(); else if (G.phase === 'defense') startVote2(); else finishVote2(); } }
+    }
+  }
+  for (let i = 0; i < players.length; i++) { const p = players[i]; // 다른 기기에서 조종하는 아바타: 받은 위치로 부드럽게 보간
+    if (p.posHold > 0) p.posHold -= dt; if (!p.remote || !p.alive) continue;
+    const dx = p.tx - p.x, dz = p.tz - p.z;
+    if (dx * dx + dz * dz > 64) { p.x = p.tx; p.z = p.tz; } else { const k = Math.min(1, dt * 14); p.x += dx * k; p.z += dz * k; }
+    p.y += (p.ty - p.y) * Math.min(1, dt * 20); if (p.ty <= 0 && p.y < 0.02) p.y = 0;
+    let da = p.tyaw - p.yaw; da = Math.atan2(Math.sin(da), Math.cos(da)); p.yaw += da * Math.min(1, dt * 14);
+    if (p.moving) p.phase += dt * 11;
+  }
+  netTick(dt);
+}
+function tick(now) {
+  requestAnimationFrame(tick);
+  const dt = Math.min(0.05, (now - last) / 1000), time = now / 1000; last = now; frame++;
+  if (G.phase === 'menu') { // 메뉴 배경: 맵을 천천히 회전하며 보여줌
+    camera.position.set(Math.sin(time * 0.08) * 70 + 10, 48, Math.cos(time * 0.08) * 70); camera.lookAt(_look.set(10, 0, 0)); renderer.render(scene, camera); return;
+  }
+  updateLook(dt); step(dt);
+  if (G.phase === 'menu') return; // step 도중 방을 나간 경우
+  if (isFree() && G.phase !== 'ended') updateFree(dt);
+  updateVisibility();
+  for (let i = 0; i < players.length; i++) drawAvatar(players[i], time);
+  partMesh.instanceMatrix.needsUpdate = true; headMesh.instanceMatrix.needsUpdate = true;
+  const pulse = 1 + Math.sin(time * 4) * 0.08, bob = Math.sin(time * 3) * 0.25;
+  for (let i = 0; i < MISSIONS.length; i++) { const m = MISSIONS[i]; m.ring.scale.set(pulse, pulse, 1); m.cone.position.y = 3.0 + bob; m.cone.rotation.y = time * 2; }
+  if (U.mode === 'host' || U.me) updateCamera();
+  if (frame % 6 === 0) updateHUD(); if (frame % 4 === 0) drawMini();
+  if (toastT > 0 && (toastT -= dt) <= 0) $('toast').style.opacity = 0;
+  renderer.render(scene, camera);
+}
+// 탭이 가려져 requestAnimationFrame 이 멈춰도 로직·동기화는 계속 진행(브라우저가 1초 간격으로 늦출 수 있음)
+let lastBg = performance.now();
+setInterval(() => { const now = performance.now();
+  if (document.hidden && G.phase !== 'menu') { let el = Math.min(1.5, (now - lastBg) / 1000); while (el > 0.001 && G.phase !== 'menu') { const d = Math.min(0.05, el); step(d); el -= d; } last = now; }
+  lastBg = now; }, 200);
+onResize(); applyTouchUI(); requestAnimationFrame(tick);
+// 디버그/확장용 핸들
+window.ArtRoomGame = { CFG, G, U, NET, AI, MISSIONS, MiniGames, registerMiniGame, openMini, colliders, boxes, test: { forceZombie: '' }, get players() { return players; } };
+})();
+</script>
+</body>
+</html>
