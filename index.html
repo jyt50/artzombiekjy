@@ -76,6 +76,7 @@
   <label class="flex items-center gap-1">지목 투표·토론(초)<input data-cfg="vote1Time" type="number" min="10" max="300" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="flex items-center gap-1">찬반 투표(초)<input data-cfg="vote2Time" type="number" min="5" max="180" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="flex items-center gap-1">총 투표 횟수<input data-cfg="maxVotes" type="number" min="1" max="20" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
+  <label class="flex items-center gap-1">1인당 미션 수<input data-cfg="missionsPer" type="number" min="3" max="9" class="w-10 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="flex items-center gap-1">좀비 수<input data-cfg="zombies" type="number" min="1" max="9" class="w-10 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="flex items-center gap-1">킬 쿨타임(초)<input data-cfg="killCooldown" type="number" min="3" max="120" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="flex items-center gap-1">순간이동 쿨타임(초)<input data-cfg="teleportCooldown" type="number" min="3" max="120" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
@@ -231,7 +232,7 @@ const COLORS = [
   ['베이지', 0xd9c3a0], ['카키', 0x8b8747], ['올리브', 0x4d5a1e], ['코랄', 0xff6f61], ['금색', 0xc9a227],
 ];
 
-// 미션 포인트 10곳 (game = 미니게임 레지스트리 키)
+// 미션 포인트 13곳 (game = 미니게임 레지스트리 키). 학생마다 이 중 CFG.missionsPer 개가 무작위로 배정됨
 const MISSIONS = [
   { id: 1, name: '팔레트 물감 짜기', game: 'palette', x: -48, z: -20 },
   { id: 2, name: '붓 세척하기', game: 'brush', x: 48, z: -21 },
@@ -243,6 +244,9 @@ const MISSIONS = [
   { id: 8, name: '가위질 선 따라 자르기', game: 'cut', x: 10, z: 27 },
   { id: 9, name: '미술 도구 제자리 정리', game: 'tools', x: 48, z: 31 },
   { id: 10, name: '책상 닦기', game: 'wipe', x: 74, z: -20 },
+  { id: 11, name: '물감 조색하기', game: 'tint', x: 32.5, z: 22.5 },
+  { id: 12, name: '도화지 압정 꽂기', game: 'pin', x: -46, z: 0.5 },
+  { id: 13, name: '점 잇기 스케치', game: 'dots', x: 47, z: -36.8 },
 ];
 
 const EMERG = { x: 0, z: 4.7 };   // 시작 지점의 비상 투표 버튼 위치
@@ -706,7 +710,7 @@ function netSend(conn, m) { try { if (conn && conn.open) conn.send(m); } catch (
 function broadcast(m) { NET.conns.forEach(c => netSend(c, m)); }
 const sendTo = (id, m) => netSend(NET.conns.get(id), m);
 const toHost = m => netSend(NET.host, m);
-const CFG_KEYS = ['missionTime', 'defenseTime', 'vote1Time', 'vote2Time', 'virusTime', 'virusNeed', 'maxVotes', 'zombies', 'killCooldown', 'teleportCooldown', 'emergPer', 'emergDelay', 'chatMode'];
+const CFG_KEYS = ['missionsPer', 'missionTime', 'defenseTime', 'vote1Time', 'vote2Time', 'virusTime', 'virusNeed', 'maxVotes', 'zombies', 'killCooldown', 'teleportCooldown', 'emergPer', 'emergDelay', 'chatMode'];
 const cfgData = () => { const o = {}; CFG_KEYS.forEach(k => { o[k] = CFG[k]; }); return o; };
 const applyCfg = c => { if (c) CFG_KEYS.forEach(k => { if (k in c) CFG[k] = c[k]; }); };
 const rosterData = () => players.map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.isBot ? 1 : 0 }));
@@ -860,7 +864,7 @@ function clientOnMsg(m) {
       U.mode = me.role; const z = U.mode === 'zombie'; if (z) players.forEach(p => { if (p.role === 'zombie') nameSprite(p); });
       $('waitPanel').classList.add('hidden'); $('btnKill').classList.toggle('hidden', !z); refreshLobbyChat(); zombieChatReset(); styleMarkers();
       $('revealT').textContent = z ? '🧟 좀비' : '🧑‍🎨 학생'; $('revealT').className = 'text-5xl font-black ' + (z ? 'text-rose-400' : 'text-emerald-400');
-      $('revealS').textContent = z ? '학생인 척하며 들키지 않게 학생들을 처치하세요.' : (G.hasZombies ? '노란 마커의 미션 3개를 완료하고, 숨어 있는 좀비를 찾아내세요.' : '연습 모드: 노란 마커의 미션 3개를 완료하세요.');
+      $('revealS').textContent = z ? '학생인 척하며 들키지 않게 학생들을 처치하세요.' : (G.hasZombies ? `노란 마커의 미션 ${me.missions.length}개를 완료하고, 숨어 있는 좀비를 찾아내세요.` : `연습 모드: 노란 마커의 미션 ${me.missions.length}개를 완료하세요.`);
       $('reveal').classList.remove('hidden'); after(3, () => $('reveal').classList.add('hidden')); break; }
     case 'round': G.phase = 'mission'; G.round = m.r; G.t = m.time; G.cand = null; meetHide();
       players.forEach(p => { p.corpse = null; if (p.alive) toSpawn(p); });
@@ -934,7 +938,7 @@ function checkWin() {
   if (!players.length) return false;
   const zs = players.filter(p => p.alive && p.role === 'zombie').length, ss = players.filter(p => p.alive && p.role === 'student').length, st = missionStats();
   if (G.hasZombies && zs === 0) return endGame('student', '좀비를 모두 추방했습니다');
-  if (st.total > 0 && st.done >= st.total) return endGame('student', '살아 있는 학생 전원이 미션 3개를 모두 완료했습니다');
+  if (st.total > 0 && st.done >= st.total) return endGame('student', '살아 있는 학생 전원이 자기 미션을 모두 완료했습니다');
   if (G.hasZombies && zs >= ss) return endGame('zombie', '좀비 수가 학생 수와 같아졌습니다');
   if (!G.hasZombies && ss === 0) return endGame('zombie', '남은 플레이어가 없습니다');
   return false;
@@ -1413,6 +1417,74 @@ registerMiniGame('wipe', {
     });
   }
 });
+// (11) 물감 조색하기: 슬라이더 3개로 견본과 같은 색 만들기(맞춘 채로 잠깐 유지)
+registerMiniGame('tint', {
+  desc: '슬라이더 3개를 움직여 "내 물감"을 "견본"과 같은 색으로 만드세요. 맞춘 상태로 잠깐 유지하면 완료!',
+  mount(root, api) {
+    const NAMES = ['빨강', '초록', '파랑'], CH = ['#e53935', '#2fa84f', '#2364e0'], TOL = 24, HOLD = 0.8;
+    const tgt = [0, 1, 2].map(() => pick([30, 55, 80, 180, 205, 230])), val = [128, 128, 128];
+    const st = mgStage(root, 250, '#2b3246', `<div class="absolute" style="left:14px;top:12px;width:112px;height:66px;border-radius:10px;background:rgb(${tgt.join(',')});border:3px solid #fff8"></div>
+      <div class="mine absolute" style="left:138px;top:12px;width:112px;height:66px;border-radius:10px;border:3px solid #fff8"></div>
+      <div class="absolute" style="left:14px;top:82px;width:112px;text-align:center;font-size:11px;color:#cbd5e1">견본</div><div class="absolute" style="left:138px;top:82px;width:112px;text-align:center;font-size:11px;color:#cbd5e1">내 물감</div>`
+      + NAMES.map((n, i) => `<div class="absolute" style="left:10px;top:${108 + i * 46}px;font-size:11px;font-weight:700;color:${CH[i]};width:34px">${n}</div>
+        <div class="sl absolute" data-i="${i}" style="left:48px;top:${102 + i * 46}px;width:202px;height:30px;border-radius:15px;background:#111827;touch-action:none;cursor:pointer"><div class="kn absolute" style="top:3px;width:24px;height:24px;border-radius:50%;background:${CH[i]};border:2px solid #fff;pointer-events:none"></div></div>`).join(''));
+    const mine = st.querySelector('.mine'), sls = [...st.querySelectorAll('.sl')]; let hold = 0, done = false, raf = 0, lt = performance.now();
+    const draw = () => { mine.style.background = `rgb(${val.map(Math.round).join(',')})`; sls.forEach((s, i) => { s.firstElementChild.style.left = (3 + val[i] / 255 * 172) + 'px'; }); };
+    sls.forEach((s, i) => { let on = false; const set = e => { const r = s.getBoundingClientRect(); val[i] = clamp((e.clientX - r.left - 15) / (r.width - 30), 0, 1) * 255; draw(); };
+      s.addEventListener('pointerdown', e => { e.preventDefault(); on = true; try { s.setPointerCapture(e.pointerId); } catch (_) {} set(e); });
+      s.addEventListener('pointermove', e => { if (on && !done) set(e); }); const up = () => { on = false; }; s.addEventListener('pointerup', up); s.addEventListener('pointercancel', up); });
+    const loop = t => { const dt = Math.min(0.1, (t - lt) / 1000); lt = t; const worst = Math.max(...val.map((v, i) => Math.abs(v - tgt[i])));
+      if (worst <= TOL) hold += dt; else hold = 0;
+      api.progress(Math.min(0.85, 1 - worst / 200) * (worst <= TOL ? 1 : 0.9) + (worst <= TOL ? 0.15 * hold / HOLD : 0));
+      mgMsg(root, worst <= TOL ? '좋아요! 그대로 유지…' : worst < 60 ? '거의 비슷해요. 조금만 더!' : '견본과 색을 비교하며 맞춰 보세요');
+      if (hold >= HOLD && !done) { done = true; api.complete(); return; } raf = requestAnimationFrame(loop); };
+    draw(); raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
+  }
+});
+// (12) 도화지 압정 꽂기: 움직이는 표시가 목표 구간에 왔을 때 탭(타이밍). 빗나가면 압정 하나가 빠짐
+registerMiniGame('pin', {
+  desc: '움직이는 화살표가 초록 구간에 들어왔을 때 화면을 탭해 압정 4개를 꽂으세요. 빗나가면 압정 하나가 빠집니다.',
+  mount(root, api) {
+    const PINS = [[40, 26], [208, 26], [40, 150], [208, 150]], TW = 240, TX = 12;
+    const st = mgStage(root, 250, '#8a6a44', `<div class="absolute" style="left:34px;top:20px;width:196px;height:146px;background:#f4efe2;box-shadow:0 3px 8px #0006;transform:rotate(-1deg)"><div style="margin:42px auto 0;width:120px;height:60px;border-radius:50%;background:#7aa6d6;opacity:.5"></div></div>`
+      + PINS.map((p, i) => `<div class="pn absolute" data-i="${i}" style="left:${p[0]}px;top:${p[1]}px;width:16px;height:16px;border-radius:50%;border:2px dashed #0006;box-sizing:border-box"></div>`).join('')
+      + `<div class="absolute" style="left:${TX}px;top:198px;width:${TW}px;height:22px;border-radius:11px;background:#111827"></div><div class="zn absolute" style="top:198px;height:22px;border-radius:6px;background:#2fa84f"></div>
+      <div class="cu absolute" style="top:188px;width:0;height:0;margin-left:-9px;border-left:9px solid transparent;border-right:9px solid transparent;border-top:16px solid #ffd92e;pointer-events:none"></div><div class="absolute" style="left:0;right:0;top:226px;text-align:center;font-size:11px;color:#f4efe2">화면 아무 곳이나 탭!</div>`);
+    st.style.cursor = 'pointer';
+    const zn = st.querySelector('.zn'), cu = st.querySelector('.cu'), pins = [...st.querySelectorAll('.pn')];
+    let n = 0, x = 0, dir = 1, speed = 150, zw = 46, zx = 0, done = false, raf = 0, lt = performance.now();
+    const newZone = () => { zw = 46 - n * 5; zx = TX + rand(10, TW - zw - 10); zn.style.left = zx + 'px'; zn.style.width = zw + 'px'; };
+    const paint = () => { pins.forEach((p, i) => { const on = i < n; p.style.background = on ? '#e53935' : 'transparent'; p.style.border = on ? '2px solid #7f1d1d' : '2px dashed #0006'; }); api.progress(n / 4); mgMsg(root, `압정 ${n} / 4`); };
+    st.addEventListener('pointerdown', e => { e.preventDefault(); if (done) return; const cx = TX + x;
+      if (cx >= zx && cx <= zx + zw) { n++; speed *= 1.18; paint(); if (n >= 4) { done = true; api.complete(); return; } newZone(); }
+      else { n = Math.max(0, n - 1); paint(); mgMsg(root, `빗나갔어요! 압정 ${n} / 4`); newZone(); } });
+    const loop = t => { const dt = Math.min(0.05, (t - lt) / 1000); lt = t; x += dir * speed * dt; if (x > TW) { x = TW; dir = -1; } if (x < 0) { x = 0; dir = 1; } cu.style.left = (TX + x) + 'px'; raf = requestAnimationFrame(loop); };
+    newZone(); paint(); raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
+  }
+});
+// (13) 점 잇기 스케치: 번호 순서대로 점을 눌러 그림 완성. 순서가 틀리면 처음부터
+registerMiniGame('dots', {
+  desc: '1번부터 번호 순서대로 점을 눌러 선을 이으세요. 마지막에 1번을 다시 눌러 그림을 닫으면 완료! 순서가 틀리면 처음부터입니다.',
+  mount(root, api) {
+    const W = STW, H = 264, N = 10, R = 20, off = Math.random() * 6.28, dirn = Math.random() < 0.5 ? 1 : -1;
+    root.innerHTML = `<canvas width="${W}" height="${H}" class="block mx-auto rounded-xl" style="display:block;margin:0 auto;width:${W}px;height:${H}px;touch-action:none;cursor:pointer"></canvas><div class="mg-msg">1번 점부터 시작!</div>`;
+    const cv = root.firstElementChild, g = cv.getContext('2d');
+    const pts = [...Array(N).keys()].map(i => { const a = off + dirn * i * Math.PI * 2 / N, r = i % 2 ? 52 : 112; return [W / 2 + Math.cos(a) * r, H / 2 + Math.sin(a) * r]; }); // 별 모양
+    let k = 0, done = false, bad = 0; // k = 지금까지 이은 점의 수
+    const draw = () => { g.fillStyle = '#f4efe2'; g.fillRect(0, 0, W, H); g.lineJoin = g.lineCap = 'round';
+      if (k > 1) { g.strokeStyle = '#2364e0'; g.lineWidth = 4; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < Math.min(k, N); i++) g.lineTo(pts[i][0], pts[i][1]); if (k > N) g.closePath(); g.stroke(); }
+      if (k > N) { g.fillStyle = '#ffd92e88'; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.fill(); }
+      pts.forEach((p, i) => { const hit = i < k, next = i === k % N && !done; g.fillStyle = bad && performance.now() < bad ? '#e53935' : hit ? '#2364e0' : next ? '#ffb300' : '#9aa3ad';
+        g.beginPath(); g.arc(p[0], p[1], next ? 13 : 11, 0, 7); g.fill(); g.fillStyle = '#fff'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(i + 1, p[0], p[1] + 0.5); }); };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (done) return;
+      const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+      let hit = -1, bd = R; pts.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd) { bd = d; hit = i; } }); if (hit < 0) return;
+      if (hit === k % N) { k++; api.progress(k / (N + 1)); mgMsg(root, k > N ? '완성!' : k === N ? '마지막으로 1번을 다시 눌러 닫으세요' : `다음은 ${k + 1}번`); if (k > N) { done = true; api.complete(); } }
+      else if (hit >= k || k === N) { k = 0; bad = performance.now() + 350; api.progress(0); mgMsg(root, '순서가 틀렸어요! 1번부터 다시'); setTimeout(() => { if (root.isConnected) draw(); }, 380); }
+      draw(); });
+    draw();
+  }
+});
 // (특수) 바이러스 웅덩이 청소: 좀비가 만든 웅덩이를 방장이 정한 인원(기본 3명)의 학생이 각자 닦아야 함
 registerMiniGame('virus', {
   get desc() { const v = G.virus; return `끈적한 바이러스 웅덩이를 문질러 100% 닦아내세요. 학생 ${v ? v.need : CFG.virusNeed}명이 각자 청소해야 사라집니다.`; },
@@ -1642,7 +1714,9 @@ function updateHUD() {
   if (lobby) mh = `<div>입장한 플레이어 ${players.length}명</div><div class="text-slate-400">${host ? '규칙을 정하고 게임을 시작하세요' : '돌아다니며 기다리세요'}</div>`;
   else if (U.ghost) mh = `<div class="text-slate-300">사망 — 관전 중</div><div class="text-slate-400">미션·채팅·투표는 할 수 없습니다</div>`;
   else if (host) mh = `<div>생존 ${al.length}명 (학생 ${al.length - zs} · 좀비 ${zs})</div><div class="text-slate-400">자유 시점으로 관전 중</div>`;
-  else if (me.role === 'student') mh = me.missions.map((mi, k) => `<div class="${me.done[k] ? 'text-emerald-400 line-through' : 'text-amber-200'}">${me.done[k] ? '✔' : '○'} ${MISSIONS[mi].name}</div>`).join('');
+  else if (me.role === 'student') { // 미션이 최대 9개라, 남은 미션만 4개까지 보여 줌
+    const left = me.missions.filter((mi, k) => !me.done[k]), dn = me.missions.length - left.length;
+    mh = `<div class="text-emerald-300 font-bold">내 미션 ${dn}/${me.missions.length} 완료</div>` + left.slice(0, 4).map(mi => `<div class="text-amber-200">○ ${MISSIONS[mi].name}</div>`).join('') + (left.length > 4 ? `<div class="text-slate-400">외 ${left.length - 4}개 (노란 마커)</div>` : ''); }
   else mh = `<div class="text-rose-200">학생인 척하며 처치하세요</div><div class="text-fuchsia-300">미니맵 터치 = 구석으로 순간이동</div><div class="text-slate-300">동료 좀비: ${players.filter(p => p.role === 'zombie' && !p.isUser).map(p => p.name).join(', ') || '없음'}</div>`;
   $('hudMissions').innerHTML = mh;
   $('hudPhase').textContent = (PHASE_KO[G.phase] || '') + (G.paused ? ' (일시정지)' : '') + (G.round ? ` · R${G.round}` : '');
@@ -1658,7 +1732,7 @@ function updateHUD() {
   if (!lobby && frame % 30 === 0) refreshZombieChat();
   if (host) { $('roomCount').textContent = `${humans().length}명 접속` + (players.length > humans().length ? ` + 봇 ${players.length - humans().length}` : ''); return; }
   if (lobby) { // 대기방: 규칙은 읽기 전용으로만 보여 줌
-    $('waitRules').textContent = `미션 ${CFG.missionTime}초 · 최후 변론 ${CFG.defenseTime}초 · 투표 ${CFG.maxVotes}회 · 좀비 ${CFG.zombies}명 · 킬 쿨타임 ${CFG.killCooldown}초 · 순간이동 ${CFG.teleportCooldown}초 · 지목 투표 ${CFG.vote1Time}초 · 찬반 투표 ${CFG.vote2Time}초 · 웅덩이 제한 ${CFG.virusTime}초 · 웅덩이 청소 ${CFG.virusNeed}명`;
+    $('waitRules').textContent = `1인당 미션 ${CFG.missionsPer}개 · 미션 시간 ${CFG.missionTime}초 · 최후 변론 ${CFG.defenseTime}초 · 투표 ${CFG.maxVotes}회 · 좀비 ${CFG.zombies}명 · 킬 쿨타임 ${CFG.killCooldown}초 · 순간이동 ${CFG.teleportCooldown}초 · 지목 투표 ${CFG.vote1Time}초 · 찬반 투표 ${CFG.vote2Time}초 · 웅덩이 제한 ${CFG.virusTime}초 · 웅덩이 청소 ${CFG.virusNeed}명`;
     $('waitInfo').textContent = `방 코드 ${NET.code} · 현재 ${players.length}명 입장 · 방장이 시작하면 역할이 배정됩니다`;
   }
   scanActions(); const u = $('btnUse'), k = $('btnKill'), a = $('btnAct');
