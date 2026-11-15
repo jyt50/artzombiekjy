@@ -1647,6 +1647,14 @@ $('meetBody').addEventListener('submit', e => {
   if (!canChat(U.me)) { refreshChatUI(); return; } // 금지 상태면 전송되지 않음(방장 기기에서도 다시 확인함)
   toHost({ t: 'chat', x: t }); inp.value = '';
 });
+// 접이식 채팅창(대기방·좀비·사망자) 배치. 모바일 세로 화면에서는 화면 한가운데, 그 외에는 오른쪽 위
+// shift: 가운데 배치일 때 버튼의 좌우 자리(-1 왼쪽, 0 가운데, 1 오른쪽 — 버튼이 두 개일 때 나란히 놓기 위함)
+function placeChatUI(tg, panel, top, rightPx, shift) {
+  if (touchUI && innerHeight > innerWidth) { const pt = Math.round(innerHeight / 2 - 80);
+    Object.assign(tg.style, { top: (pt - 38) + 'px', left: '50%', right: 'auto', transform: `translateX(${shift < 0 ? -104 : shift > 0 ? 4 : -50}%)` });
+    Object.assign(panel.style, { top: pt + 'px', left: '50%', right: 'auto', transform: 'translateX(-50%)' });
+  } else { Object.assign(tg.style, { top: top + 'px', left: '', right: rightPx + 'px', transform: '' }); Object.assign(panel.style, { top: (top + 34) + 'px', left: '', right: '', transform: '' }); }
+}
 // ---- 대기방 채팅: 게임 시작 전 플레이어와 방장이 함께 쓰는 채팅 ----
 let lcOpen = false, lcUnread = 0;
 function lobbyChatAdd(name, color, text, sys) {
@@ -1668,7 +1676,7 @@ function refreshLobbyChat() {
   const muted = U.mode !== 'host' && CFG.chatMode === 'none'; $('lcIn').disabled = $('lcBtn').disabled = muted;
   $('lcIn').placeholder = muted ? '방장이 채팅을 금지했습니다' : '대기방 채팅';
   const top = Math.round($(U.mode === 'host' ? 'hostPanel' : 'waitPanel').getBoundingClientRect().bottom) + 8; // 위쪽 패널 바로 아래에 배치
-  $('lcToggle').style.top = top + 'px'; $('lobbyChat').style.top = (top + 34) + 'px';
+  placeChatUI($('lcToggle'), $('lobbyChat'), top, 8, 0);
 }
 $('lcToggle').addEventListener('click', () => { lcOpen = !lcOpen; if (lcOpen) lcUnread = 0; refreshLobbyChat(); $('lcLog').scrollTop = 1e9; });
 $('lcForm').addEventListener('submit', e => { e.preventDefault(); const inp = $('lcIn'), t = inp.value.trim(); if (!t || G.phase !== 'lobby') return;
@@ -1699,7 +1707,7 @@ function refreshZombieChat() {
   const can = U.mode === 'zombie' && U.me.alive && CFG.chatMode !== 'none'; $('zcIn').disabled = $('zcBtn').disabled = !can;
   $('zcIn').placeholder = can ? '좀비 채팅' : U.mode === 'host' ? '방장은 읽기만 가능합니다' : !U.me.alive ? '사망자는 읽기만 가능합니다' : '방장이 채팅을 금지했습니다';
   const top = U.mode === 'host' ? Math.round($('hostPanel').getBoundingClientRect().bottom) + 8 : 96; // 방장은 패널 아래, 좀비는 미니맵 아래
-  $('zcToggle').style.top = top + 'px'; $('zombieChat').style.top = (top + 34) + 'px';
+  placeChatUI($('zcToggle'), $('zombieChat'), top, 8, dcVisible() ? 1 : 0);
 }
 $('zcToggle').addEventListener('click', () => { zcOpen = !zcOpen; if (zcOpen) { zcUnread = 0; dcOpen = false; refreshDeadChat(); } refreshZombieChat(); $('zcLog').scrollTop = 1e9; });
 $('zcForm').addEventListener('submit', e => { e.preventDefault(); const inp = $('zcIn'), t = inp.value.trim();
@@ -1729,7 +1737,7 @@ function refreshDeadChat() {
   $('dcIn').placeholder = can ? '사망자 채팅' : U.mode === 'host' ? '방장은 읽기만 가능합니다' : '방장이 채팅을 금지했습니다';
   const top = U.mode === 'host' ? Math.round($('hostPanel').getBoundingClientRect().bottom) + 8 : 96;
   const zc = $('zcToggle'), side = zc.classList.contains('hidden') ? 8 : 8 + zc.offsetWidth + 6; // 좀비 채팅 버튼이 있으면 그 왼쪽에 나란히
-  $('dcToggle').style.top = top + 'px'; $('dcToggle').style.right = side + 'px'; $('deadChat').style.top = (top + 34) + 'px';
+  placeChatUI($('dcToggle'), $('deadChat'), top, side, zc.classList.contains('hidden') ? 0 : -1);
 }
 $('dcToggle').addEventListener('click', () => { dcOpen = !dcOpen; if (dcOpen) { dcUnread = 0; zcOpen = false; refreshZombieChat(); } refreshDeadChat(); $('dcLog').scrollTop = 1e9; }); // 두 채팅창은 한 번에 하나만 펼침
 $('dcForm').addEventListener('submit', e => { e.preventDefault(); const inp = $('dcIn'), t = inp.value.trim();
