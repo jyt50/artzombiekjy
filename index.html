@@ -241,7 +241,7 @@ const COLORS = [
   ['베이지', 0xd9c3a0], ['카키', 0x8b8747], ['올리브', 0x4d5a1e], ['코랄', 0xff6f61], ['금색', 0xc9a227],
 ];
 
-// 미션 포인트 13곳 (game = 미니게임 레지스트리 키). 학생마다 이 중 CFG.missionsPer 개가 무작위로 배정됨
+// 미션 포인트 16곳 (game = 미니게임 레지스트리 키). 학생마다 이 중 CFG.missionsPer 개가 무작위로 배정됨
 const MISSIONS = [
   { id: 1, name: '팔레트 물감 짜기', game: 'palette', x: -48, z: -20 },
   { id: 2, name: '붓 세척하기', game: 'brush', x: 48, z: -21 },
@@ -256,6 +256,9 @@ const MISSIONS = [
   { id: 11, name: '물감 조색하기', game: 'tint', x: 32.5, z: 22.5 },
   { id: 12, name: '도화지 압정 꽂기', game: 'pin', x: -46, z: 0.5 },
   { id: 13, name: '점 잇기 스케치', game: 'dots', x: 47, z: -36.8 },
+  { id: 14, name: '미술 카드 짝 맞추기', game: 'memory', x: -26, z: -36.2 },
+  { id: 15, name: '물감 무지개 순서 정리', game: 'rainbow', x: 47, z: 0.5 },
+  { id: 16, name: '숫자 색칠하기', game: 'paintnum', x: 74, z: 31.5 },
 ];
 
 const EMERG = { x: 0, z: 4.7 };   // 시작 지점의 비상 투표 버튼 위치
@@ -1429,26 +1432,28 @@ registerMiniGame('wipe', {
     });
   }
 });
-// (11) 물감 조색하기: 슬라이더 3개로 견본과 같은 색 만들기(맞춘 채로 잠깐 유지)
+// (11) 물감 조색하기: 슬라이더 2개(색상·밝기)로 견본과 같은 색 만들기(맞춘 채로 잠깐 유지)
 registerMiniGame('tint', {
-  desc: '슬라이더 3개를 움직여 "내 물감"을 "견본"과 같은 색으로 만드세요. 맞춘 상태로 잠깐 유지하면 완료!',
+  desc: '슬라이더 2개(색상·밝기)를 움직여 "내 물감"을 "견본"과 같은 색으로 만드세요. 맞춘 상태로 잠깐 유지하면 완료!',
   mount(root, api) {
-    const NAMES = ['빨강', '초록', '파랑'], CH = ['#e53935', '#2fa84f', '#2364e0'], TOL = 24, HOLD = 0.8;
-    const tgt = [0, 1, 2].map(() => pick([30, 55, 80, 180, 205, 230])), val = [128, 128, 128];
-    const st = mgStage(root, 250, '#2b3246', `<div class="absolute" style="left:14px;top:12px;width:112px;height:66px;border-radius:10px;background:rgb(${tgt.join(',')});border:3px solid #fff8"></div>
+    const HOLD = 0.7, TOL_H = 22, TOL_L = 9, L0 = 20, L1 = 85, col = (h, l) => `hsl(${Math.round(h)},78%,${Math.round(l)}%)`;
+    const tgt = [pick([0, 30, 55, 120, 200, 275, 320]), pick([35, 50, 68])], val = [(tgt[0] + 180) % 360, tgt[1] > 50 ? 30 : 75]; // [색상 0~360, 밝기 %] — 견본과 먼 색에서 시작
+    const BG = ['linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)', 'linear-gradient(90deg,#222,#888,#eee)'], NAMES = ['색상', '밝기'];
+    const st = mgStage(root, 214, '#2b3246', `<div class="absolute" style="left:14px;top:12px;width:112px;height:66px;border-radius:10px;background:${col(tgt[0], tgt[1])};border:3px solid #fff8"></div>
       <div class="mine absolute" style="left:138px;top:12px;width:112px;height:66px;border-radius:10px;border:3px solid #fff8"></div>
       <div class="absolute" style="left:14px;top:82px;width:112px;text-align:center;font-size:11px;color:#cbd5e1">견본</div><div class="absolute" style="left:138px;top:82px;width:112px;text-align:center;font-size:11px;color:#cbd5e1">내 물감</div>`
-      + NAMES.map((n, i) => `<div class="absolute" style="left:10px;top:${108 + i * 46}px;font-size:11px;font-weight:700;color:${CH[i]};width:34px">${n}</div>
-        <div class="sl absolute" data-i="${i}" style="left:48px;top:${102 + i * 46}px;width:202px;height:30px;border-radius:15px;background:#111827;touch-action:none;cursor:pointer"><div class="kn absolute" style="top:3px;width:24px;height:24px;border-radius:50%;background:${CH[i]};border:2px solid #fff;pointer-events:none"></div></div>`).join(''));
+      + NAMES.map((n, i) => `<div class="absolute" style="left:10px;top:${116 + i * 48}px;font-size:12px;font-weight:700;color:#e2e8f0;width:34px">${n}</div>
+        <div class="sl absolute" data-i="${i}" style="left:48px;top:${108 + i * 48}px;width:202px;height:32px;border-radius:16px;background:${BG[i]};touch-action:none;cursor:pointer"><div class="kn absolute" style="top:2px;width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #111;pointer-events:none"></div></div>`).join(''));
     const mine = st.querySelector('.mine'), sls = [...st.querySelectorAll('.sl')]; let hold = 0, done = false, raf = 0, lt = performance.now();
-    const draw = () => { mine.style.background = `rgb(${val.map(Math.round).join(',')})`; sls.forEach((s, i) => { s.firstElementChild.style.left = (3 + val[i] / 255 * 172) + 'px'; }); };
-    sls.forEach((s, i) => { let on = false; const set = e => { const r = s.getBoundingClientRect(); val[i] = clamp((e.clientX - r.left - 15) / (r.width - 30), 0, 1) * 255; draw(); };
+    const frac = i => i === 0 ? val[0] / 360 : (val[1] - L0) / (L1 - L0);
+    const draw = () => { mine.style.background = col(val[0], val[1]); sls.forEach((s, i) => { s.firstElementChild.style.left = (3 + frac(i) * 172) + 'px'; }); };
+    sls.forEach((s, i) => { let on = false; const set = e => { const r = s.getBoundingClientRect(), t = clamp((e.clientX - r.left - 15) / (r.width - 30), 0, 1); if (i === 0) val[0] = t * 360; else val[1] = L0 + t * (L1 - L0); draw(); };
       s.addEventListener('pointerdown', e => { e.preventDefault(); on = true; try { s.setPointerCapture(e.pointerId); } catch (_) {} set(e); });
       s.addEventListener('pointermove', e => { if (on && !done) set(e); }); const up = () => { on = false; }; s.addEventListener('pointerup', up); s.addEventListener('pointercancel', up); });
-    const loop = t => { const dt = Math.min(0.1, (t - lt) / 1000); lt = t; const worst = Math.max(...val.map((v, i) => Math.abs(v - tgt[i])));
-      if (worst <= TOL) hold += dt; else hold = 0;
-      api.progress(Math.min(0.85, 1 - worst / 200) * (worst <= TOL ? 1 : 0.9) + (worst <= TOL ? 0.15 * hold / HOLD : 0));
-      mgMsg(root, worst <= TOL ? '좋아요! 그대로 유지…' : worst < 60 ? '거의 비슷해요. 조금만 더!' : '견본과 색을 비교하며 맞춰 보세요');
+    const loop = t => { const dt = Math.min(0.1, (t - lt) / 1000); lt = t; let dh = Math.abs(val[0] - tgt[0]); dh = Math.min(dh, 360 - dh); const dl = Math.abs(val[1] - tgt[1]), ok = dh <= TOL_H && dl <= TOL_L;
+      hold = ok ? hold + dt : 0;
+      api.progress(ok ? 0.8 + 0.2 * hold / HOLD : 0.8 * (1 - Math.min(1, dh / 180 * 0.6 + dl / 65 * 0.4)));
+      mgMsg(root, ok ? '좋아요! 그대로 유지…' : dh > TOL_H ? '색상 슬라이더를 움직여 같은 색 계열을 찾으세요' : '색상은 맞아요. 밝기를 조절하세요');
       if (hold >= HOLD && !done) { done = true; api.complete(); return; } raf = requestAnimationFrame(loop); };
     draw(); raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
   }
@@ -1493,6 +1498,70 @@ registerMiniGame('dots', {
       let hit = -1, bd = R; pts.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd) { bd = d; hit = i; } }); if (hit < 0) return;
       if (hit === k % N) { k++; api.progress(k / (N + 1)); mgMsg(root, k > N ? '완성!' : k === N ? '마지막으로 1번을 다시 눌러 닫으세요' : `다음은 ${k + 1}번`); if (k > N) { done = true; api.complete(); } }
       else if (hit >= k || k === N) { k = 0; bad = performance.now() + 350; api.progress(0); mgMsg(root, '순서가 틀렸어요! 1번부터 다시'); setTimeout(() => { if (root.isConnected) draw(); }, 380); }
+      draw(); });
+    draw();
+  }
+});
+// (14) 미술 카드 짝 맞추기: 카드 10장(5쌍)을 뒤집어 같은 그림끼리 맞추기
+registerMiniGame('memory', {
+  desc: '카드를 두 장씩 뒤집어 같은 미술 도구끼리 짝을 맞추세요. 5쌍을 모두 찾으면 완료!',
+  mount(root, api) {
+    const ICON = ['🎨', '🖌️', '✂️', '📐', '🖍️'], deck = shuffle([...ICON, ...ICON].map((c, i) => ({ c, k: i % 5 })));
+    const st = mgStage(root, 206, '#2b3246', deck.map((d, i) => `<div class="cd absolute" data-i="${i}" style="left:${6 + (i % 5) * 51}px;top:${8 + ((i / 5) | 0) * 98}px;width:47px;height:90px;border-radius:8px;background:#6d597a;border:2px solid #fff5;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:26px;cursor:pointer;touch-action:none;transition:background .15s"></div>`).join(''));
+    const els = [...st.querySelectorAll('.cd')], state = deck.map(() => 0); let open = [], n = 0, busy = false, live = true; // 0 뒷면, 1 펼침, 2 맞춤
+    const paint = () => els.forEach((e, i) => { e.textContent = state[i] ? deck[i].c : ''; e.style.background = state[i] === 2 ? '#2fa84f' : state[i] === 1 ? '#f4efe2' : '#6d597a'; });
+    mgMsg(root, '0 / 5 쌍');
+    st.addEventListener('pointerdown', e => { const c = e.target.closest('.cd'); if (!c || busy) return; e.preventDefault(); const i = +c.dataset.i; if (state[i]) return;
+      state[i] = 1; open.push(i); paint(); if (open.length < 2) return;
+      const [a, b] = open; open = [];
+      if (deck[a].k === deck[b].k) { state[a] = state[b] = 2; n++; paint(); api.progress(n / 5); mgMsg(root, `${n} / 5 쌍`); if (n >= 5) api.complete(); }
+      else { busy = true; setTimeout(() => { if (!live) return; state[a] = state[b] = 0; busy = false; paint(); }, 650); } });
+    paint(); return () => { live = false; };
+  }
+});
+// (15) 물감 무지개 순서 정리: 두 튜브를 차례로 눌러 자리를 바꿔 빨·주·노·초·파·보 순서로
+registerMiniGame('rainbow', {
+  desc: '물감 튜브 두 개를 차례로 누르면 자리가 바뀝니다. 왼쪽부터 빨강·주황·노랑·초록·파랑·보라 순서로 정리하세요.',
+  mount(root, api) {
+    const C = [['빨강', '#e53935'], ['주황', '#ff8a1f'], ['노랑', '#ffd92e'], ['초록', '#2fa84f'], ['파랑', '#2364e0'], ['보라', '#8a3ffc']];
+    let ord = shuffle([0, 1, 2, 3, 4, 5]); while (ord.filter((v, i) => v === i).length > 1) ord = shuffle(ord); // 거의 다 섞인 상태에서 시작
+    const st = mgStage(root, 170, '#c8a66f', `<div class="absolute" style="left:8px;right:8px;top:128px;height:10px;border-radius:5px;background:#6b4f35"></div>` + [0, 1, 2, 3, 4, 5].map(i => `<div class="tb absolute" data-p="${i}" style="left:${10 + i * 41.5}px;top:22px;width:36px;height:104px;cursor:pointer;touch-action:none;transition:transform .12s">
+        <div style="width:14px;height:14px;margin:0 auto;background:#e5e7eb;border-radius:3px 3px 0 0"></div><div class="bd" style="height:90px;border-radius:6px 6px 14px 14px;border:2px solid #0004;box-sizing:border-box"></div></div>`).join(''));
+    const els = [...st.querySelectorAll('.tb')]; let sel = -1, done = false;
+    const paint = () => { els.forEach((e, i) => { e.querySelector('.bd').style.background = C[ord[i]][1]; e.style.transform = i === sel ? 'translateY(-12px)' : ''; });
+      const ok = ord.filter((v, i) => v === i).length; api.progress(ok / 6); mgMsg(root, done ? '무지개 순서 완성!' : sel >= 0 ? `${C[ord[sel]][0]}과 바꿀 튜브를 누르세요` : `제자리 ${ok} / 6`); return ok; };
+    st.addEventListener('pointerdown', e => { const t = e.target.closest('.tb'); if (!t || done) return; e.preventDefault(); const i = +t.dataset.p;
+      if (sel < 0) sel = i; else { if (sel !== i) [ord[sel], ord[i]] = [ord[i], ord[sel]]; sel = -1; }
+      if (sel < 0 && ord.every((v, k) => v === k)) { done = true; paint(); api.complete(); return; } paint(); });
+    paint();
+  }
+});
+// (16) 숫자 색칠하기: 번호가 같은 색을 골라 그림의 칸을 칠하기
+registerMiniGame('paintnum', {
+  desc: '아래에서 물감을 고른 뒤, 같은 번호가 적힌 칸을 눌러 색칠하세요. 6칸을 모두 맞는 색으로 칠하면 완료!',
+  mount(root, api) {
+    const W = STW, H = 200;
+    const REG = [ // 뒤에서 앞으로 그리는 순서. [번호, 색, 경로, 번호 표시 위치]
+      [1, '#6ec6ff', g => g.rect(0, 0, W, 130), [40, 30]],
+      [2, '#ffd92e', g => g.arc(212, 40, 24, 0, 7), [212, 40]],
+      [3, '#2fa84f', g => { g.moveTo(0, H); g.lineTo(0, 132); g.quadraticCurveTo(132, 78, W, 132); g.lineTo(W, H); g.closePath(); }, [36, 176]],
+      [4, '#f4a261', g => g.rect(96, 112, 72, 62), [116, 150]],
+      [5, '#e53935', g => { g.moveTo(84, 112); g.lineTo(132, 70); g.lineTo(180, 112); g.closePath(); }, [132, 98]],
+      [6, '#14592f', g => g.arc(224, 132, 21, 0, 7), [224, 132]] ];
+    const pal = shuffle(REG.map(r => r[0]));
+    root.innerHTML = `<canvas width="${W}" height="${H}" class="block mx-auto rounded-xl" style="display:block;margin:0 auto;width:${W}px;height:${H}px;touch-action:none;cursor:pointer"></canvas>
+      <div style="display:flex;justify-content:center;gap:6px;margin-top:8px">${pal.map(n => `<button class="sw" data-n="${n}" style="width:38px;height:38px;border-radius:50%;background:${REG[n - 1][1]};border:3px solid #fff5;color:#fff;font-weight:800;font-size:14px;text-shadow:0 0 3px #000,0 0 3px #000;touch-action:none">${n}</button>`).join('')}</div><div class="mg-msg">먼저 아래에서 물감을 고르세요</div>`;
+    const cv = root.firstElementChild, g = cv.getContext('2d'), sws = [...root.querySelectorAll('.sw')], painted = {}; let sel = 0, n = 0, done = false;
+    const draw = () => { g.clearRect(0, 0, W, H); REG.forEach(r => { g.beginPath(); r[2](g); g.fillStyle = painted[r[0]] ? r[1] : '#f8f5ec'; g.fill(); g.strokeStyle = '#3b4252'; g.lineWidth = 2; g.stroke(); });
+      g.font = 'bold 14px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; REG.forEach(r => { if (painted[r[0]]) return; g.fillStyle = '#3b4252'; g.fillText(r[0], r[3][0], r[3][1]); });
+      sws.forEach(b => { b.style.borderColor = +b.dataset.n === sel ? '#fff' : '#fff5'; b.style.transform = +b.dataset.n === sel ? 'scale(1.15)' : ''; b.style.opacity = painted[b.dataset.n] ? 0.35 : 1; }); };
+    root.addEventListener('pointerdown', e => { const b = e.target.closest('.sw'); if (!b || done) return; e.preventDefault(); sel = +b.dataset.n; mgMsg(root, `${sel}번 물감 선택 — ${sel}번 칸을 누르세요`); draw(); });
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (done) return; if (!sel) { mgMsg(root, '먼저 아래에서 물감을 고르세요'); return; }
+      const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height; let hit = 0;
+      for (let i = REG.length - 1; i >= 0 && !hit; i--) { g.beginPath(); REG[i][2](g); if (g.isPointInPath(x, y)) hit = REG[i][0]; }
+      if (!hit || painted[hit]) return;
+      if (hit === sel) { painted[hit] = true; n++; api.progress(n / 6); mgMsg(root, `${n} / 6 칸 완성`); if (n >= 6) { done = true; draw(); api.complete(); return; } }
+      else mgMsg(root, `그 칸은 ${hit}번이에요. ${hit}번 물감으로 칠해야 해요`);
       draw(); });
     draw();
   }
