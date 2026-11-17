@@ -90,6 +90,8 @@
   <label class="hr flex items-center gap-1">특별 미션 간격(초 이내)<input data-cfg="specWithin" type="number" min="10" max="300" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="hr flex items-center gap-1">특별 미션 실패 시 이동 제한(초)<input data-cfg="specFreeze" type="number" min="5" max="99" class="w-12 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="hr flex items-center gap-1">투표 후 위치 초기화<input data-cfgb="resetPos" type="checkbox"></label>
+  <label class="hr flex items-center gap-1">사망자에게 역할 공개<input data-cfgb="ghostSee" type="checkbox"></label>
+  <label class="hr flex items-center gap-1">좀비 비상 투표 금지<input data-cfgb="emergNoZombie" type="checkbox"></label>
   <label class="hr flex items-center gap-1">비상 투표(1인당)<input data-cfg="emergPer" type="number" min="0" max="5" class="w-10 bg-slate-800 rounded px-1 py-0.5 text-center"></label>
   <label class="hr flex items-center gap-1">점프 허용<input id="hostJump" type="checkbox" checked></label>
   <label class="hr flex items-center gap-1">채팅
@@ -239,6 +241,8 @@ const CFG = {
   trapNeed: 3,                  // 조색 덫: 해제에 필요한 학생 수
   sheriffs: 1, sheriffCooldown: 40, // 보안관 수(0~5)와 처치 쿨타임(초)
   resetPos: true,               // 투표가 끝난 뒤 모든 플레이어를 시작 지점으로 되돌릴지
+  emergNoZombie: true,          // 좀비는 비상 투표 버튼을 누를 수 없음(방장이 켜고 끔)
+  ghostSee: true,               // 사망자도 방장처럼 좀비·보안관을 볼 수 있는지
   specWithin: 40, specFreeze: 10, specLimit: 45, // 특별 미션: 다음 미션까지 최대 대기(초), 실패 시 이동 제한(초), 막아야 하는 제한 시간(초)
   virusTime: 60, virusNeed: 3,  // 바이러스 웅덩이: 제한 시간(초), 청소해야 하는 학생 수
   playerSpeed: 5.4, vote1Time: 20, vote2Time: 15, sightRange: 30, witnessRange: 11,
@@ -712,9 +716,11 @@ function setNetTarget(p, x, z, y, yaw) {
   if (gap > 0.03 && gap < 0.5) p.iv += (gap - p.iv) * 0.2;
   p.sx = p.x; p.sz = p.z; p.sy = p.y; p.syaw = p.yaw; p.it = 0; p.tx = x; p.tz = z; p.ty = y; p.tyaw = yaw;
 }
+// 모든 역할(좀비·보안관)을 볼 수 있는 사람: 방장, 그리고 방장이 허용했을 때의 사망자
+const seeRoles = () => G.phase !== 'lobby' && (U.mode === 'host' || (U.ghost && G.seeAll));
 function nameSprite(p) {
   if (p.sprite) { scene.remove(p.sprite); p.sprite.material.map.dispose(); p.sprite.material.dispose(); }
-  const game = G.phase !== 'lobby', mate = game && U.mode === 'zombie' && p.role === 'zombie', host = game && U.mode === 'host'; // 방장에게는 모든 역할이 보임
+  const game = G.phase !== 'lobby', mate = game && U.mode === 'zombie' && p.role === 'zombie', host = seeRoles(); // 방장(과 역할 공개를 받은 사망자)에게는 모든 역할이 보임
   const col = mate || (host && p.role === 'zombie') ? '#ff6b6b' : host && p.sheriff ? '#7cc4ff' : '#ffffff';
   p.sprite = textSprite([{ text: (host ? roleTag(p) : '') + (p.isUser ? `${p.name} (나)` : p.name), size: 40, y: 34, color: col }], 256, 64, 2.6);
   scene.add(p.sprite);
@@ -739,6 +745,7 @@ function resetCommon() {
   U.ghost = false; U.yaw = Math.PI; U.pitch = -0.85; U.fp = { x: 0, y: 22, z: 26 };
   G.phase = 'lobby'; G.t = 0; G.round = 0; G.voteNo = 0; G.paused = false; G.cand = null; G.hasZombies = false; G.stat = { done: 0, total: 0 };
   G.virus = null; G.virusUsed = false; showVirus(); G.trap = null; G.trapUsed = false; showTrap(); showSpec(); refreshZombieChat(); refreshDeadChat();
+  G.seeAll = false; G.mates = [];
 }
 // 사망·추방된 학생은 관전만 하므로 미션 집계에서 빠집니다(살아 있는 학생 전원이 완료하면 학생 승리)
 function missionStats() {
@@ -785,7 +792,7 @@ function netSend(conn, m) { try { if (conn && conn.open) conn.send(m); } catch (
 function broadcast(m) { NET.conns.forEach(c => netSend(c, m)); }
 const sendTo = (id, m) => netSend(NET.conns.get(id), m);
 const toHost = m => netSend(NET.host, m);
-const CFG_KEYS = ['trapNeed', 'sheriffs', 'sheriffCooldown', 'resetPos', 'specWithin', 'specFreeze', 'specLimit', 'jump', 'missionsPer', 'missionTime', 'defenseTime', 'vote1Time', 'vote2Time', 'virusTime', 'virusNeed', 'maxVotes', 'zombies', 'killCooldown', 'teleportCooldown', 'emergPer', 'emergDelay', 'chatMode'];
+const CFG_KEYS = ['emergNoZombie', 'ghostSee', 'trapNeed', 'sheriffs', 'sheriffCooldown', 'resetPos', 'specWithin', 'specFreeze', 'specLimit', 'jump', 'missionsPer', 'missionTime', 'defenseTime', 'vote1Time', 'vote2Time', 'virusTime', 'virusNeed', 'maxVotes', 'zombies', 'killCooldown', 'teleportCooldown', 'emergPer', 'emergDelay', 'chatMode'];
 const cfgData = () => { const o = {}; CFG_KEYS.forEach(k => { o[k] = CFG[k]; }); return o; };
 const applyCfg = c => { if (c) CFG_KEYS.forEach(k => { if (k in c) CFG[k] = c[k]; }); };
 const rosterData = () => players.map(p => ({ id: p.id, name: p.name, color: p.color, bot: p.isBot ? 1 : 0 }));
@@ -877,7 +884,7 @@ function hostOnMsg(conn, m) {
       if (!mission || !p.alive || !v || !v.alive || !near(p.tx, p.tz, v.x, v.z, CFG.killRange + 2.5)) break;
       if (p.sheriff) sheriffKill(p, v); else if (p.role === 'zombie' && p.killCd <= 0.35 && v.role === 'student') kill(p, v); break; }
     case 'report': { const c = byId(m.c); if (mission && p.alive && c && !c.alive && c.corpse && !c.corpse.rep && near(p.tx, p.tz, c.corpse.x, c.corpse.z, 7)) startVote1(`${p.name} 님이 ${c.name}의 시체를 신고했습니다`); break; }
-    case 'emerg': if (mission && p.alive && p.emerg < CFG.emergPer && CFG.missionTime - G.t >= CFG.emergDelay - 0.5 && near(p.tx, p.tz, EMERG.x, EMERG.z, 6)) { p.emerg++; startVote1(`${p.name} 님이 비상 투표를 소집했습니다`); } break;
+    case 'emerg': if (mission && p.alive && !(CFG.emergNoZombie && p.role === 'zombie') && p.emerg < CFG.emergPer && CFG.missionTime - G.t >= CFG.emergDelay - 0.5 && near(p.tx, p.tz, EMERG.x, EMERG.z, 6)) { p.emerg++; startVote1(`${p.name} 님이 비상 투표를 소집했습니다`); } break;
     case 'virus': virusCreate(p); break;
     case 'trap': trapCreate(p); break;
     case 'tclean': if (G.trap) trapClean(p); break;
@@ -944,7 +951,7 @@ function clientOnMsg(m) {
       applyCfg(m.cfg); timers = []; G.hasZombies = !!m.hz; G.phase = 'mission'; G.virus = null; G.virusUsed = false; showVirus(); me.vclean = false;
       players.forEach(p => { p.role = 'student'; }); (m.mates || []).forEach(id => { const p = byId(id); if (p) p.role = 'zombie'; });
       me.role = m.role; me.sheriff = !!m.sh; me.missions = m.missions; me.done = m.missions.map(() => false); me.killCd = 0; me.emerg = 0; me.tpCd = 0;
-      me.tdone = false; me.trapped = false; me.frozen = 0; me.spec = null; me.specT = -1; G.trap = null; G.trapUsed = false; showTrap(); showSpec();
+      me.tdone = false; me.trapped = false; me.frozen = 0; me.spec = null; me.specT = -1; G.trap = null; G.trapUsed = false; showTrap(); showSpec(); G.seeAll = false; G.mates = m.mates || [];
       U.mode = me.role; const z = U.mode === 'zombie'; if (z) players.forEach(p => { if (p.role === 'zombie') nameSprite(p); });
       $('waitPanel').classList.add('hidden'); $('btnKill').classList.toggle('hidden', !(z || me.sheriff)); refreshLobbyChat(); zombieChatReset(); deadChatReset(); styleMarkers();
       $('revealT').textContent = z ? '🧟 좀비' : me.sheriff ? '⭐ 보안관' : '🧑‍🎨 학생'; $('revealT').className = 'text-5xl font-black ' + (z ? 'text-rose-400' : me.sheriff ? 'text-sky-400' : 'text-emerald-400');
@@ -978,6 +985,12 @@ function clientOnMsg(m) {
     case 'trap': G.trapUsed = true; G.trap = { ri: m.ri, need: m.need, n: 0, ids: [] }; if (me) { me.tdone = false; me.trapped = false; } trapAppeared(); break;
     case 'tprog': if (G.trap) { G.trap.n = m.n; if (m.need) G.trap.need = m.need; showTrap(); } break;
     case 'tdone': if (G.trap) trapCleared(); break;
+    case 'roles': { // 사망자에게 공개된 역할(방장 설정 '사망자에게 역할 공개'). off 면 다시 숨김
+      G.seeAll = !m.off;
+      players.forEach(p => { if (p === me) return;
+        if (G.seeAll) { p.role = (m.z || []).includes(p.id) ? 'zombie' : 'student'; p.sheriff = (m.sh || []).includes(p.id); }
+        else if (!p.ejected) { p.role = me.role === 'zombie' && G.mates.includes(p.id) ? 'zombie' : 'student'; p.sheriff = false; } }); // 숨길 때: 원래 알던 것(동료 좀비, 추방으로 공개된 역할)만 남김
+      players.forEach(nameSprite); if (G.seeAll && m.first) toast('사망자에게는 좀비(🧟)와 보안관(⭐)이 보입니다', 4); break; }
   }
 }
 // 방 나가기(참가자·방장 공용). 방장이 나가면 방이 닫힘
@@ -1133,7 +1146,14 @@ function trapTick(me) {
 function doTrap() { if (miniOpen || U.mode !== 'zombie' || U.ghost || G.trapUsed || G.paused || G.phase !== 'mission') return; toHost({ t: 'trap' }); }
 
 // ───────── 보안관: 학생 편. 일정 시간마다 누구든 1명을 처치할 수 있음. 좀비를 잡으면 전원에게 알림, 학생을 잡으면 자신도 사망 ─────────
-function hostKillPlayer(v, why) { const cx = v.x, cz = v.z, cw = v.yaw; markDead(v, cx, cz, cw, why); broadcast({ t: 'kill', v: v.id, x: cx, z: cz, w: cw, why: why || '' }); }
+function hostKillPlayer(v, why) { const cx = v.x, cz = v.z, cw = v.yaw; markDead(v, cx, cz, cw, why); broadcast({ t: 'kill', v: v.id, x: cx, z: cz, w: cw, why: why || '' }); revealRoles(v, true); }
+// 사망자에게 모든 역할을 알려 줌(방장 설정이 켜져 있을 때만). 살아 있는 사람에게는 절대 보내지 않음
+const roleData = () => ({ z: players.filter(p => p.role === 'zombie').map(p => p.id), sh: players.filter(p => p.sheriff).map(p => p.id) });
+function revealRoles(p, first) { if (!isHost() || !p || p.isBot || p.left || p.alive || !CFG.ghostSee || G.phase === 'lobby' || G.phase === 'ended') return; sendTo(p.id, { t: 'roles', ...roleData(), first: first ? 1 : 0 }); }
+function hostSyncGhostRoles() { // 게임 중에 설정을 바꿨을 때 사망자 전원에게 다시 보냄
+  if (!isHost() || G.phase === 'lobby' || G.phase === 'ended') return;
+  players.forEach(p => { if (p.alive || p.isBot || p.left) return; if (CFG.ghostSee) revealRoles(p, true); else sendTo(p.id, { t: 'roles', off: 1 }); });
+}
 function sheriffKill(s, v) { // 방장 기기에서 확정
   if (!isHost() || G.phase !== 'mission' || !s.alive || !s.sheriff || !v || !v.alive || v === s || s.killCd > 0.35) return;
   s.killCd = CFG.sheriffCooldown; if (!s.isBot) sendTo(s.id, { t: 'kcd', cd: s.killCd });
@@ -1307,7 +1327,9 @@ function scanActions() {
   if (me.role === 'zombie' || me.sheriff) { let kd = CFG.killRange; players.forEach(p => { if (!p.alive || p === me || (me.role === 'zombie' && p.role === 'zombie')) return; const d = Math.hypot(p.x - px, p.z - pz); if (d < kd && !sightBlocked(px, pz, p.x, p.z)) { kd = d; act.victim = p; } }); }
   let cd = 3.2; players.forEach(p => { if (p.alive || !p.corpse || p.corpse.rep) return; const d = Math.hypot(p.corpse.x - px, p.corpse.z - pz); if (d < cd && !sightBlocked(px, pz, p.corpse.x, p.corpse.z)) { cd = d; act.corpse = p; } });
   act.virus = !!G.virus && Math.hypot(G.virus.x - px, G.virus.z - pz) < 3.4 && (me.role === 'zombie' || !me.vclean); // 웅덩이 청소(학생당 1회)
-  act.emerg = !act.corpse && me.emerg < CFG.emergPer && Math.hypot(EMERG.x - px, EMERG.z - pz) < 3; // 시작 지점의 비상 투표 버튼
+  const atBtn = !act.corpse && Math.hypot(EMERG.x - px, EMERG.z - pz) < 3; // 시작 지점의 비상 투표 버튼
+  act.emergNo = atBtn && CFG.emergNoZombie && me.role === 'zombie';      // 방장이 좀비의 비상 투표를 막아 둔 경우
+  act.emerg = atBtn && !act.emergNo && me.emerg < CFG.emergPer;
 }
 function doUse() {
   if (miniOpen || G.phase !== 'mission' || !U.me || U.ghost) return;
@@ -1334,6 +1356,7 @@ function doVirus() { if (miniOpen || U.mode !== 'zombie' || U.ghost || G.virusUs
 function doReport() { // 상호작용 버튼: 시체 신고 또는 비상 투표
   if (miniOpen || G.phase !== 'mission' || U.ghost || G.paused || !U.me) return;
   if (act.corpse) { toHost({ t: 'report', c: act.corpse.id }); return; }
+  if (act.emergNo) { toast('좀비는 비상 투표를 열 수 없습니다'); return; }
   if (!act.emerg) return;
   const wait = CFG.emergDelay - (CFG.missionTime - G.t);
   if (wait > 0) { toast(`비상 투표는 ${Math.ceil(wait)}초 뒤부터 누를 수 있습니다`); return; }
@@ -1846,7 +1869,7 @@ const chatBox = h => `<div id="chatLog" class="chat-log overflow-y-auto rounded-
     <button id="chatBtn" class="rounded-lg bg-amber-400 text-slate-900 font-bold px-4 disabled:opacity-40">전송</button></form>`;
 function chatReplay() { const log = $('chatLog'); if (log) { log.innerHTML = chatHist.join(''); log.scrollTop = 1e9; } refreshChatUI(); }
 function uiVote1(reason) {
-  const al = aliveList(), can = userCanVote(), hostV = U.mode === 'host'; chatHist = [];
+  const al = aliveList(), can = userCanVote(), hostV = seeRoles(); chatHist = [];
   players.forEach(p => { if (p.corpse) p.corpse.rep = true; }); // 회의가 열리면 지금까지의 시체는 '신고 완료' 처리(같은 시체로 다시 신고할 수 없음)
   let h = `<div class="flex justify-between items-baseline mb-1"><h2 class="text-lg font-extrabold">🗳️ 1차 투표: 추방 후보 지목 <span class="text-xs text-slate-400">(${G.voteNo}/${CFG.maxVotes}회차)</span></h2>${tmr()}</div>
     <p class="text-xs text-slate-300 mb-3">${esc(reason)} · 생존 ${al.length}명</p><div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5 mb-3">`;
@@ -1918,7 +1941,7 @@ function finishVote2() {
   const out = c.alive && yes > (yes + no) / 2;
   uiVote2Result(yes, no, out); broadcast({ t: 'vote2r', yes, no, out });
   if (!out) { after(3, endVoteCycle); return; }
-  after(2, () => { c.alive = false; c.ejected = true; c.corpse = null; uiEject(c); broadcast({ t: 'eject', id: c.id, role: c.role }); virusAdjust(); trapAdjust(); after(3, endVoteCycle); });
+  after(2, () => { c.alive = false; c.ejected = true; c.corpse = null; uiEject(c); broadcast({ t: 'eject', id: c.id, role: c.role }); revealRoles(c, true); virusAdjust(); trapAdjust(); after(3, endVoteCycle); });
 }
 function endVoteCycle() {
   if (checkWin()) return;
@@ -2073,7 +2096,7 @@ function updateHUD() {
   const al = aliveList(), zs = al.filter(p => p.role === 'zombie').length;
   let mh = '';
   if (lobby) mh = `<div>입장한 플레이어 ${players.length}명</div><div class="text-slate-400">${host ? '규칙을 정하고 게임을 시작하세요' : '돌아다니며 기다리세요'}</div>`;
-  else if (U.ghost) mh = `<div class="text-slate-300">사망 — 관전 중</div><div class="text-slate-400">미션·투표 불가 · 사망자 채팅만 가능</div>`;
+  else if (U.ghost) mh = `<div class="text-slate-300">사망 — 관전 중</div><div class="text-slate-400">미션·투표 불가 · 사망자 채팅만 가능</div>` + (G.seeAll ? `<div class="text-rose-200">🧟 좀비 · ⭐ 보안관 표시 중</div>` : '');
   else if (host) mh = `<div>생존 ${al.length}명 (학생 ${al.length - zs} · 좀비 ${zs})</div><div class="text-slate-400">자유 시점으로 관전 중</div>`;
   else if (me.role === 'student') { // 미션이 최대 9개라, 남은 미션만 4개까지 보여 줌
     const left = me.missions.filter((mi, k) => !me.done[k]), dn = me.missions.length - left.length;
@@ -2099,7 +2122,7 @@ function updateHUD() {
   if (!lobby && frame % 30 === 0) { refreshZombieChat(); refreshDeadChat(); }
   if (host) { $('roomCount').textContent = `${humans().length}명 접속` + (players.length > humans().length ? ` + 봇 ${players.length - humans().length}` : ''); return; }
   if (lobby) { // 대기방: 규칙은 읽기 전용으로만 보여 줌
-    $('waitRules').textContent = `1인당 미션 ${CFG.missionsPer}개 · 미션 시간 ${CFG.missionTime}초 · 최후 변론 ${CFG.defenseTime}초 · 투표 ${CFG.maxVotes}회 · 좀비 ${CFG.zombies}명 · 킬 쿨타임 ${CFG.killCooldown}초 · 순간이동 ${CFG.teleportCooldown}초 · 지목 투표 ${CFG.vote1Time}초 · 찬반 투표 ${CFG.vote2Time}초 · 웅덩이 제한 ${CFG.virusTime}초 · 웅덩이 청소 ${CFG.virusNeed}명 · 점프 ${CFG.jump ? '허용' : '금지'} · 조색 덫 해제 ${CFG.trapNeed}명 · 보안관 ${CFG.sheriffs}명(쿨타임 ${CFG.sheriffCooldown}초) · 특별 미션 ${CFG.specWithin}초 이내/실패 시 ${CFG.specFreeze}초 정지 · 투표 후 위치 ${CFG.resetPos ? '초기화' : '유지'}`;
+    $('waitRules').textContent = `1인당 미션 ${CFG.missionsPer}개 · 미션 시간 ${CFG.missionTime}초 · 최후 변론 ${CFG.defenseTime}초 · 투표 ${CFG.maxVotes}회 · 좀비 ${CFG.zombies}명 · 킬 쿨타임 ${CFG.killCooldown}초 · 순간이동 ${CFG.teleportCooldown}초 · 지목 투표 ${CFG.vote1Time}초 · 찬반 투표 ${CFG.vote2Time}초 · 웅덩이 제한 ${CFG.virusTime}초 · 웅덩이 청소 ${CFG.virusNeed}명 · 점프 ${CFG.jump ? '허용' : '금지'} · 조색 덫 해제 ${CFG.trapNeed}명 · 보안관 ${CFG.sheriffs}명(쿨타임 ${CFG.sheriffCooldown}초) · 특별 미션 ${CFG.specWithin}초 이내/실패 시 ${CFG.specFreeze}초 정지 · 투표 후 위치 ${CFG.resetPos ? '초기화' : '유지'} · 사망자 역할 공개 ${CFG.ghostSee ? '켬' : '끔'} · 좀비 비상 투표 ${CFG.emergNoZombie ? '금지' : '허용'}`;
     $('waitInfo').textContent = `방 코드 ${NET.code} · 현재 ${players.length}명 입장 · 방장이 시작하면 역할이 배정됩니다`;
   }
   scanActions(); const u = $('btnUse'), k = $('btnKill'), a = $('btnAct');
@@ -2107,7 +2130,7 @@ function updateHUD() {
   $('btnVirus').classList.toggle('hidden', !(U.mode === 'zombie' && !G.virusUsed && !lobby && !U.ghost));
   $('btnTrap').classList.toggle('hidden', !(U.mode === 'zombie' && !G.trapUsed && !lobby && !U.ghost));
   k.classList.toggle('off', !act.victim || me.killCd > 0); k.firstChild.textContent = (me.sheriff ? '⭐ 처치' : '🧟 공격') + (me.killCd > 0 ? ` ${Math.ceil(me.killCd)}s` : '');
-  a.classList.toggle('off', !act.corpse && !act.emerg); a.firstChild.textContent = act.emerg ? '🚨 비상 투표' : '📣 시체 신고';
+  a.classList.toggle('off', !act.corpse && !act.emerg); a.firstChild.textContent = act.emergNo ? '🚫 비상 투표 불가' : act.emerg ? '🚨 비상 투표' : '📣 시체 신고';
 }
 const mini = $('mini'), mg = mini.getContext('2d'), miniBg = document.createElement('canvas'); miniBg.width = 288; miniBg.height = 160;
 (function drawMiniBg() { const g = miniBg.getContext('2d'), s = 2; g.fillStyle = '#0c101a'; g.fillRect(0, 0, 288, 160);
@@ -2127,7 +2150,7 @@ function drawMini() {
   if (G.virus) { mg.fillStyle = (frame >> 3) & 1 ? '#bef264' : '#4d7c0f'; mg.beginPath(); mg.arc((G.virus.x - MAP.x0) * s, (G.virus.z - MAP.z0) * s, 8, 0, 7); mg.fill(); } // 바이러스 웅덩이 위치
   if (G.trap) { const r = ROOMS[G.trap.ri]; mg.strokeStyle = '#ff5fd8'; mg.lineWidth = 3; mg.strokeRect((r.x0 - MAP.x0) * s + 2, (r.z0 - MAP.z0) * s + 2, (r.x1 - r.x0) * s - 4, (r.z1 - r.z0) * s - 4); } // 조색 덫이 있는 방
   if (U.me && U.me.spec) { mg.fillStyle = '#c084fc'; mg.beginPath(); mg.arc((U.me.spec.x - MAP.x0) * s, (U.me.spec.z - MAP.z0) * s, 7, 0, 7); mg.fill(); } // 내 특별 미션
-  if (isFree()) players.forEach(p => { if (!p.alive) return; const x = (p.x - MAP.x0) * s, y = (p.z - MAP.z0) * s, host = U.mode === 'host' && G.phase !== 'lobby';
+  if (isFree()) players.forEach(p => { if (!p.alive) return; const x = (p.x - MAP.x0) * s, y = (p.z - MAP.z0) * s, host = seeRoles();
     if (host && p.role === 'zombie') { mg.fillStyle = '#ff2d2d'; mg.fillRect(x - 5, y - 5, 10, 10); } else if (host && p.sheriff) { mg.fillStyle = '#38bdf8'; mg.fillRect(x - 5, y - 5, 10, 10); } // 방장: 좀비 빨강, 보안관 파랑 테두리
     mg.fillStyle = hex(p.color); mg.fillRect(x - 2, y - 2, 4, 4); });
   if (U.mode === 'zombie' && !U.ghost && G.phase !== 'lobby') { // 순간이동 도착지와 쿨타임
@@ -2143,7 +2166,7 @@ function drawMini() {
  * ===================================================================== */
 // 규칙은 방장만 바꿀 수 있고, 바뀔 때마다 전원에게 전달됨
 function syncCfg() { document.querySelectorAll('[data-cfg]').forEach(i => { i.value = CFG[i.dataset.cfg]; }); document.querySelectorAll('[data-cfgb]').forEach(i => { i.checked = !!CFG[i.dataset.cfgb]; }); }
-document.querySelectorAll('[data-cfgb]').forEach(i => i.addEventListener('change', () => { if (!isHost()) { syncCfg(); return; } CFG[i.dataset.cfgb] = i.checked; broadcast({ t: 'cfg', cfg: cfgData() }); })); // 켜고 끄는 규칙
+document.querySelectorAll('[data-cfgb]').forEach(i => i.addEventListener('change', () => { if (!isHost()) { syncCfg(); return; } CFG[i.dataset.cfgb] = i.checked; broadcast({ t: 'cfg', cfg: cfgData() }); if (i.dataset.cfgb === 'ghostSee') hostSyncGhostRoles(); })); // 켜고 끄는 규칙
 document.querySelectorAll('[data-cfg]').forEach(i => i.addEventListener('change', () => {
   if (!isHost()) { syncCfg(); return; }
   CFG[i.dataset.cfg] = clamp(parseInt(i.value, 10) || +i.min, +i.min, +i.max); syncCfg(); broadcast({ t: 'cfg', cfg: cfgData() }); }));
