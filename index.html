@@ -281,7 +281,7 @@ const COLORS = [
   ['베이지', 0xd9c3a0], ['카키', 0x8b8747], ['올리브', 0x4d5a1e], ['코랄', 0xff6f61], ['금색', 0xc9a227],
 ];
 
-// 미션 포인트 16곳 (game = 미니게임 레지스트리 키). 학생마다 이 중 CFG.missionsPer 개가 무작위로 배정됨
+// 미션 포인트 19곳 (game = 미니게임 레지스트리 키). 학생마다 이 중 CFG.missionsPer 개가 무작위로 배정됨
 const MISSIONS = [
   { id: 1, name: '팔레트 물감 짜기', game: 'palette', x: -48, z: -20 },
   { id: 2, name: '붓 세척하기', game: 'brush', x: 48, z: -21 },
@@ -299,6 +299,9 @@ const MISSIONS = [
   { id: 14, name: '미술 카드 짝 맞추기', game: 'memory', x: -26, z: -36.2 },
   { id: 15, name: '물감 무지개 순서 정리', game: 'rainbow', x: 47, z: 0.5 },
   { id: 16, name: '숫자 색칠하기', game: 'paintnum', x: 74, z: 31.5 },
+  { id: 17, name: '데칼코마니 완성하기', game: 'decal', x: -55, z: 27 },
+  { id: 18, name: '틀린 그림 찾기', game: 'diff', x: 40, z: 14 },
+  { id: 19, name: '명도 단계 정리하기', game: 'value', x: 14, z: 31 },
 ];
 
 const EMERG = { x: 0, z: 4.7 };   // 시작 지점의 비상 투표 버튼 위치
@@ -1232,7 +1235,7 @@ function specTick(me, dt) {
   if (me.spec) { if (me.spec.t > 0) me.spec.t -= dt;
     if (me.spec.t <= 0 && !(miniOpen && specMini)) { me.spec = null; showSpec(); me.frozen = CFG.specFreeze; me.specT = rand(4, CFG.specWithin); toast(`구멍을 막지 못했습니다! ${CFG.specFreeze}초 동안 움직일 수 없습니다`, 4); }
     return; }
-  if (!(me.specT > 0)) { if (me.specT === 0) { const [x, z] = specSpot(); me.spec = { x, z, t: CFG.specLimit, type: pick(['holeball', 'holeseq']) }; me.specT = -1; showSpec(); toast(`🕳 좀비 구멍이 나타났습니다! ${CFG.specLimit}초 안에 찾아가 막으세요 (보라색 표시)`, 5); return; }
+  if (!(me.specT > 0)) { if (me.specT === 0) { const [x, z] = specSpot(); me.spec = { x, z, t: CFG.specLimit, type: pick(['holeball', 'holeseq', 'holewhack', 'holetape']) }; me.specT = -1; showSpec(); toast(`🕳 좀비 구멍이 나타났습니다! ${CFG.specLimit}초 안에 찾아가 막으세요 (보라색 표시)`, 5); return; }
     me.specT = rand(4, CFG.specWithin); return; } // 다음 특별 미션까지의 시간(방장이 정한 시간 이내에서 무작위)
   me.specT = Math.max(0, me.specT - dt);
 }
@@ -1778,11 +1781,11 @@ registerMiniGame('pin', {
       <div class="cu absolute" style="top:188px;width:0;height:0;margin-left:-9px;border-left:9px solid transparent;border-right:9px solid transparent;border-top:16px solid #ffd92e;pointer-events:none"></div><div class="absolute" style="left:0;right:0;top:226px;text-align:center;font-size:11px;color:#f4efe2">화면 아무 곳이나 탭!</div>`);
     st.style.cursor = 'pointer';
     const zn = st.querySelector('.zn'), cu = st.querySelector('.cu'), pins = [...st.querySelectorAll('.pn')];
-    let n = 0, x = 0, dir = 1, speed = 150, zw = 46, zx = 0, done = false, raf = 0, lt = performance.now();
-    const newZone = () => { zw = 46 - n * 5; zx = TX + rand(10, TW - zw - 10); zn.style.left = zx + 'px'; zn.style.width = zw + 'px'; };
+    let n = 0, x = 0, dir = 1, speed = 125, zw = 50, zx = 0, done = false, raf = 0, lt = performance.now();
+    const newZone = () => { zw = 50 - n * 3; zx = TX + rand(10, TW - zw - 10); zn.style.left = zx + 'px'; zn.style.width = zw + 'px'; };
     const paint = () => { pins.forEach((p, i) => { const on = i < n; p.style.background = on ? '#e53935' : 'transparent'; p.style.border = on ? '2px solid #7f1d1d' : '2px dashed #0006'; }); api.progress(n / 4); mgMsg(root, `압정 ${n} / 4`); };
     st.addEventListener('pointerdown', e => { e.preventDefault(); if (done) return; const cx = TX + x;
-      if (cx >= zx && cx <= zx + zw) { n++; speed *= 1.18; paint(); if (n >= 4) { done = true; api.complete(); return; } newZone(); }
+      if (cx >= zx && cx <= zx + zw) { n++; speed = Math.min(150, speed * 1.06); /* 꽂을 때마다 아주 조금만 빨라짐(최대 속도 제한) */ paint(); if (n >= 4) { done = true; api.complete(); return; } newZone(); }
       else { n = Math.max(0, n - 1); paint(); mgMsg(root, `빗나갔어요! 압정 ${n} / 4`); newZone(); } });
     const loop = t => { const dt = Math.min(0.05, (t - lt) / 1000); lt = t; x += dir * speed * dt; if (x > TW) { x = TW; dir = -1; } if (x < 0) { x = 0; dir = 1; } cu.style.left = (TX + x) + 'px'; raf = requestAnimationFrame(loop); };
     newZone(); paint(); raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
@@ -1915,6 +1918,106 @@ registerMiniGame('holeseq', {
       if (i === seq[k]) { k++; b.style.opacity = 0.2; b.style.transform = 'scale(.8)'; api.progress(k / 5); mgMsg(root, `좋아요! (${k} / 5)`); if (k >= 5) { done = true; api.complete(); } }
       else { input = false; mgMsg(root, '순서가 틀렸어요! 새 순서를 다시 보여 줄게요'); later(900, show); } });
     show(); return () => { live = false; T.forEach(clearTimeout); };
+  }
+});
+// (17) 데칼코마니 완성하기: 접는 선을 기준으로 왼쪽 무늬를 오른쪽에 거울처럼 똑같이 칠하기
+registerMiniGame('decal', {
+  desc: '가운데 접는 선을 기준으로, 왼쪽 무늬가 오른쪽에 거울처럼 찍히도록 오른쪽 칸을 눌러 칠하세요. 잘못 칠한 칸은 다시 누르면 지워집니다.',
+  mount(root, api) {
+    const R = 4, CC = 4, CS = 28, GP = 4, SW = CC * CS + (CC - 1) * GP, col = pick(['#e53935', '#2364e0', '#8a3ffc', '#2fa84f', '#ff8a1f']);
+    const left = [...Array(R * CC)].map(() => false); let k = 0; while (k < 7) { const i = (Math.random() * left.length) | 0; if (!left[i]) { left[i] = true; k++; } }
+    const target = [...Array(R * CC)].map((_, i) => left[((i / CC) | 0) * CC + (CC - 1 - (i % CC))]), right = target.map(() => false), need = target.filter(Boolean).length;
+    const cell = (side, i, on) => `<div class="${side}" data-i="${i}" style="position:absolute;left:${(side === 'rc' ? SW + 16 : 0) + (i % CC) * (CS + GP)}px;top:${14 + ((i / CC) | 0) * (CS + GP)}px;width:${CS}px;height:${CS}px;border-radius:6px;background:${on ? col : '#f4efe2'};border:1px solid #0002;${side === 'rc' ? 'cursor:pointer;touch-action:none' : ''}"></div>`;
+    const st = mgStage(root, 14 * 2 + R * CS + (R - 1) * GP, '#c8b89a', left.map((v, i) => cell('lc', i, v)).join('') + right.map((v, i) => cell('rc', i, false)).join('')
+      + `<div class="absolute" style="left:${SW + 7}px;top:4px;bottom:4px;width:2px;background:repeating-linear-gradient(#0006 0 6px,transparent 6px 11px)"></div>`);
+    const rc = [...st.querySelectorAll('.rc')]; let done = false;
+    const check = () => { let ok = 0, bad = 0; right.forEach((v, i) => { if (v && target[i]) ok++; else if (v && !target[i]) bad++; });
+      api.progress(Math.max(0, ok - bad) / need); mgMsg(root, bad ? `잘못 칠한 칸이 ${bad}개 있어요` : `${ok} / ${need} 칸`); if (ok === need && !bad && !done) { done = true; api.complete(); } };
+    st.addEventListener('pointerdown', e => { const c = e.target.closest('.rc'); if (!c || done) return; e.preventDefault(); const i = +c.dataset.i; right[i] = !right[i]; c.style.background = right[i] ? col : '#f4efe2'; check(); });
+    mgMsg(root, `0 / ${need} 칸`);
+  }
+});
+// (18) 틀린 그림 찾기: 위아래 정물화에서 다른 곳 3군데를 아래 그림에서 찾아 누르기
+registerMiniGame('diff', {
+  desc: '위 그림과 아래 그림에서 다른 곳 3군데를 찾아 아래 그림에서 누르세요.',
+  mount(root, api) {
+    const W = STW, H = 128, COL = ['#e53935', '#ffd92e', '#2fa84f', '#2364e0', '#8a3ffc', '#ff8a1f', '#7a4a26'];
+    const items = [], fits = (x, y, r) => items.every(o => Math.hypot(o.x - x, o.y - y) > o.r + r + 6);
+    const add = (kind, r, yMin, yMax) => { for (let t = 0; t < 60; t++) { const x = rand(r + 6, W - r - 6), y = rand(yMin, yMax); if (fits(x, y, r)) { items.push({ kind, x, y, r, c: pick(COL) }); return; } } };
+    add('sun', 13, 18, 30); add('frame', 18, 26, 34); add('vase', 15, 70, 80); add('book', 16, 92, 100); ['fruit', 'fruit', 'fruit', 'cup'].forEach(k => add(k, 10, 84, 104)); add('star', 9, 14, 40);
+    const diffs = shuffle(items.map((_, i) => i)).slice(0, 3).map(i => ({ i, type: pick(['color', 'gone', 'big']) }));
+    const draw = (g, alt) => { g.fillStyle = '#cfe3ef'; g.fillRect(0, 0, W, H); g.fillStyle = '#b48a5a'; g.fillRect(0, 86, W, H - 86); g.fillStyle = '#8a6a44'; g.fillRect(0, 84, W, 4);
+      items.forEach((o, i) => { const d = alt && diffs.find(q => q.i === i); if (d && d.type === 'gone') return; const r = d && d.type === 'big' ? o.r * 1.45 : o.r, c = d && d.type === 'color' ? COL[(COL.indexOf(o.c) + 3) % COL.length] : o.c;
+        g.fillStyle = c; g.strokeStyle = '#0005'; g.lineWidth = 1.5; g.beginPath();
+        if (o.kind === 'sun' || o.kind === 'fruit') g.arc(o.x, o.y, r, 0, 7);
+        else if (o.kind === 'frame') { g.fillStyle = '#6b4f35'; g.fillRect(o.x - r, o.y - r * 0.75, r * 2, r * 1.5); g.fillStyle = c; g.rect(o.x - r + 3, o.y - r * 0.75 + 3, r * 2 - 6, r * 1.5 - 6); }
+        else if (o.kind === 'vase') { g.moveTo(o.x - r * 0.5, o.y - r); g.lineTo(o.x + r * 0.5, o.y - r); g.lineTo(o.x + r * 0.8, o.y + r); g.lineTo(o.x - r * 0.8, o.y + r); g.closePath(); }
+        else if (o.kind === 'book') g.rect(o.x - r, o.y - r * 0.4, r * 2, r * 0.8);
+        else if (o.kind === 'cup') g.rect(o.x - r * 0.7, o.y - r, r * 1.4, r * 1.8);
+        else if (o.kind === 'star') for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.45 : r; g.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); }
+        g.fill(); g.stroke(); }); };
+    root.innerHTML = `<canvas width="${W}" height="${H}" style="display:block;margin:0 auto 6px;border-radius:10px;width:${W}px;height:${H}px"></canvas><canvas width="${W}" height="${H}" style="display:block;margin:0 auto;border-radius:10px;width:${W}px;height:${H}px;touch-action:none;cursor:pointer"></canvas><div class="mg-msg">0 / 3 찾음</div>`;
+    const [c1, c2] = root.querySelectorAll('canvas'), g2 = c2.getContext('2d'), found = []; draw(c1.getContext('2d'), false);
+    const repaint = (miss) => { draw(g2, true); g2.lineWidth = 3; found.forEach(i => { const o = items[i]; g2.strokeStyle = '#e53935'; g2.beginPath(); g2.arc(o.x, o.y, o.r * 1.6 + 4, 0, 7); g2.stroke(); });
+      if (miss) { g2.strokeStyle = '#111'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(miss[0] - 7, miss[1] - 7); g2.lineTo(miss[0] + 7, miss[1] + 7); g2.moveTo(miss[0] + 7, miss[1] - 7); g2.lineTo(miss[0] - 7, miss[1] + 7); g2.stroke(); } };
+    c2.addEventListener('pointerdown', e => { e.preventDefault(); if (found.length >= 3) return; const r = c2.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+      const d = diffs.find(q => !found.includes(q.i) && Math.hypot(items[q.i].x - x, items[q.i].y - y) < items[q.i].r * 1.5 + 8);
+      if (d) { found.push(d.i); repaint(); api.progress(found.length / 3); mgMsg(root, `${found.length} / 3 찾음`); if (found.length >= 3) api.complete(); }
+      else { repaint([x, y]); mgMsg(root, `거긴 같아요 · ${found.length} / 3 찾음`); setTimeout(() => { if (root.isConnected && found.length < 3) repaint(); }, 500); } });
+    repaint();
+  }
+});
+// (19) 명도 단계 정리하기: 같은 색의 밝기 7단계를 가장 밝은 것부터 어두운 순서로 누르기
+registerMiniGame('value', {
+  desc: '같은 색이지만 밝기가 다른 물감 7개가 있어요. 가장 밝은 것부터 가장 어두운 것까지 순서대로 누르세요. 틀리면 처음부터!',
+  mount(root, api) {
+    const hue = pick([0, 30, 50, 120, 210, 270]), L = [90, 78, 66, 54, 42, 30, 18], pos = [];
+    for (let i = 0; i < 7; i++) { for (let t = 0; t < 80; t++) { const x = rand(8, STW - 58), y = rand(8, 176); if (pos.every(p => Math.abs(p[0] - x) > 56 || Math.abs(p[1] - y) > 56)) { pos.push([x, y]); break; } } if (pos.length <= i) pos.push([8 + (i % 4) * 62, 20 + ((i / 4) | 0) * 90]); }
+    const st = mgStage(root, 240, '#e9e4d8', L.map((l, i) => `<div class="vs" data-i="${i}" style="position:absolute;left:${pos[i][0]}px;top:${pos[i][1]}px;width:50px;height:50px;border-radius:12px;background:hsl(${hue},45%,${l}%);border:2px solid #0003;cursor:pointer;touch-action:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;text-shadow:0 0 3px #000"></div>`).join(''));
+    const els = [...st.querySelectorAll('.vs')]; let k = 0, done = false;
+    const reset = () => { k = 0; els.forEach(e => { e.textContent = ''; e.style.outline = ''; }); api.progress(0); };
+    st.addEventListener('pointerdown', e => { const b = e.target.closest('.vs'); if (!b || done) return; e.preventDefault(); const i = +b.dataset.i; if (b.textContent) return;
+      if (i === k) { k++; b.textContent = k; b.style.outline = '3px solid #2fa84f'; api.progress(k / 7); mgMsg(root, k >= 7 ? '명도 순서 완성!' : `${k} / 7 · 다음으로 밝은 색은?`); if (k >= 7) { done = true; api.complete(); } }
+      else { b.style.outline = '3px solid #e53935'; mgMsg(root, '순서가 틀렸어요! 가장 밝은 색부터 다시'); setTimeout(() => { if (root.isConnected && !done) reset(); }, 450); } });
+    mgMsg(root, '가장 밝은 색부터 누르세요 (0 / 7)');
+  }
+});
+// (특별 3) 좀비 구멍 막기 — 좀비 손 두드리기: 구멍에서 잠깐 튀어나오는 좀비 손을 10번 두드리기
+registerMiniGame('holewhack', {
+  desc: '구멍에서 좀비 손이 잠깐씩 튀어나와요. 나올 때 재빨리 눌러 10번 두드리면 구멍이 막힙니다.',
+  mount(root, api) {
+    const NEED = 10, st = mgStage(root, 250, '#2b2233', [...Array(9).keys()].map(i => `<div class="hl" data-i="${i}" style="position:absolute;left:${16 + (i % 3) * 82}px;top:${14 + ((i / 3) | 0) * 78}px;width:68px;height:62px;border-radius:50%;background:radial-gradient(#000 55%,#3b2a44);cursor:pointer;touch-action:none;overflow:hidden"><div class="hd" style="position:absolute;left:14px;top:62px;width:40px;height:52px;border-radius:18px 18px 6px 6px;background:#6fbf3a;transition:top .12s;pointer-events:none"></div></div>`).join(''));
+    const hs = [...st.querySelectorAll('.hl')]; let up = -1, hits = 0, done = false, live = true, T = 0;
+    const show = () => { if (!live || done) return; if (up >= 0) hs[up].firstChild.style.top = '62px'; let n; do { n = (Math.random() * 9) | 0; } while (n === up); up = n; hs[up].firstChild.style.top = '10px';
+      T = setTimeout(() => { if (!live || done) return; hs[up].firstChild.style.top = '62px'; up = -1; T = setTimeout(show, rand(150, 350)); }, rand(800, 1100)); };
+    st.addEventListener('pointerdown', e => { const h = e.target.closest('.hl'); if (!h || done) return; e.preventDefault(); if (+h.dataset.i !== up) return;
+      clearTimeout(T); h.firstChild.style.top = '62px'; up = -1; hits++; api.progress(hits / NEED); mgMsg(root, `${hits} / ${NEED}`); if (hits >= NEED) { done = true; api.complete(); return; } T = setTimeout(show, rand(200, 400)); });
+    mgMsg(root, `0 / ${NEED}`); T = setTimeout(show, 500); return () => { live = false; clearTimeout(T); };
+  }
+});
+// (특별 4) 좀비 구멍 막기 — 테이프 붙이기: 초록 점에서 빨간 점까지 손을 떼지 않고 끌어 테이프 3줄로 구멍 막기
+registerMiniGame('holetape', {
+  desc: '초록 점에서 빨간 점까지 손을 떼지 말고 곧게 끌어 테이프를 붙이세요. 3줄을 붙이면 구멍이 막힙니다.',
+  mount(root, api) {
+    const W = STW, H = 240, cx = W / 2, cy = H / 2, TOL = 20, a0 = Math.random() * Math.PI;
+    const lines = [0, 1, 2].map(k => { const a = a0 + k * Math.PI / 3, r = 96; return [cx - Math.cos(a) * r, cy - Math.sin(a) * r, cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+    root.innerHTML = `<canvas width="${W}" height="${H}" style="display:block;margin:0 auto;border-radius:12px;width:${W}px;height:${H}px;touch-action:none;cursor:crosshair"></canvas><div class="mg-msg">1번째 테이프: 초록 점에서 시작</div>`;
+    const cv = root.firstElementChild, g = cv.getContext('2d'); let k = 0, drag = null, done = false;
+    const segD = (L, x, y) => { const [x1, y1, x2, y2] = L, dx = x2 - x1, dy = y2 - y1, t = clamp(((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy), 0, 1); return [Math.hypot(x - (x1 + dx * t), y - (y1 + dy * t)), t]; };
+    const draw = () => { g.fillStyle = '#5b4a3a'; g.fillRect(0, 0, W, H); g.fillStyle = '#0a050c'; g.beginPath(); g.ellipse(cx, cy, 70, 58, 0, 0, 7); g.fill(); g.strokeStyle = '#b980ff'; g.lineWidth = 2; g.stroke();
+      lines.forEach((L, i) => { if (i < k) { g.strokeStyle = 'rgba(220,220,210,.92)'; g.lineWidth = 22; g.lineCap = 'butt'; g.beginPath(); g.moveTo(L[0], L[1]); g.lineTo(L[2], L[3]); g.stroke(); } });
+      if (k < 3) { const L = lines[k]; g.setLineDash([7, 6]); g.strokeStyle = '#fff8'; g.lineWidth = 3; g.beginPath(); g.moveTo(L[0], L[1]); g.lineTo(L[2], L[3]); g.stroke(); g.setLineDash([]);
+        if (drag) { g.strokeStyle = 'rgba(220,220,210,.75)'; g.lineWidth = 22; g.beginPath(); g.moveTo(L[0], L[1]); g.lineTo(L[0] + (L[2] - L[0]) * drag.t, L[1] + (L[3] - L[1]) * drag.t); g.stroke(); }
+        g.fillStyle = '#2fa84f'; g.beginPath(); g.arc(L[0], L[1], 11, 0, 7); g.fill(); g.fillStyle = '#e53935'; g.beginPath(); g.arc(L[2], L[3], 11, 0, 7); g.fill(); } };
+    const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
+    const fail = m => { drag = null; mgMsg(root, m); draw(); };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (done) return; const [x, y] = pos(e), L = lines[k]; if (Math.hypot(x - L[0], y - L[1]) > 22) { mgMsg(root, '초록 점에서 시작하세요'); return; }
+      drag = { id: e.pointerId, t: 0 }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} draw(); });
+    cv.addEventListener('pointermove', e => { if (!drag || e.pointerId !== drag.id) return; const [x, y] = pos(e), [d, t] = segD(lines[k], x, y);
+      if (d > TOL) { fail('테이프가 비뚤어졌어요! 초록 점부터 다시'); return; } drag.t = Math.max(drag.t, t); draw();
+      if (drag.t > 0.95) { drag = null; k++; api.progress(k / 3); if (k >= 3) { done = true; draw(); mgMsg(root, '구멍을 막았어요!'); api.complete(); return; } mgMsg(root, `${k + 1}번째 테이프: 초록 점에서 시작`); draw(); } });
+    const up = e => { if (drag && e.pointerId === drag.id) fail('손을 뗐어요! 초록 점부터 다시'); }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    draw();
   }
 });
 // (특수) 바이러스 웅덩이 청소: 좀비가 만든 웅덩이를 방장이 정한 인원(기본 3명)의 학생이 각자 닦아야 함
